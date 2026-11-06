@@ -1,0 +1,9 @@
+{
+  "modelos": [
+    { "modelo": "MDL-1024-A", "longitud_mm": 980.0 },
+    { "modelo": "MDL-2048-A", "longitud_mm": 1250.0 },
+    { "modelo": "MDL-2048-B", "longitud_mm": 1320.5 },
+    { "modelo": "MDL-3072-C", "longitud_mm": 1580.0 },
+    { "modelo": "MDL-4096-D", "longitud_mm": 2100.0 }
+  ]
+}

@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GSW — CORTADORA DE TUBO</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("dmat_theme");
+        if (t === "light" || t === "dark") {
+          document.documentElement.setAttribute("data-theme", t);
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <h1><span class="brand-prefix">GSW —</span> CORTADORA DE TUBO</h1>
+        <p class="subtitle">By. R&amp;D</p>
+      </div>
+    </div>
+    <button type="button" class="btn-app-settings" id="btnAppSettings" aria-haspopup="dialog" aria-controls="settingsModal">
+      <span class="btn-app-settings__icon" aria-hidden="true">⚙</span>
+      <span>Configuración</span>
+    </button>
+  </header>
+
+  <div class="main-layout">
+    <div class="status-banner status-banner--idle status-banner--full" id="statusBanner" role="status">
+      <div class="status-banner__main">
+        <span class="status-banner__dot" id="statusBannerDot"></span>
+        <span class="status-banner__label" id="statusBannerLabel">En espera</span>
+      </div>
+      <p class="status-banner__detail" id="statusBannerDetail">Sistema listo. Sin errores activos.</p>
+      <div class="status-banner__actions" id="statusBannerActions" hidden>
+        <button type="button" class="btn btn-manual" data-action="purga_alimentar">Alimentar</button>
+        <button type="button" class="btn btn-manual" data-action="purga_limpiar">Limpiar</button>
+        <button type="button" class="btn btn-manual" data-action="charola_vacia" hidden>Charola vacía</button>
+        <button type="button" class="btn btn-manual" data-action="purga_continuar">Continuar</button>
+        <button type="button" class="btn btn-manual" data-action="purga_terminar">Terminar</button>
+      </div>
+    </div>
+
+    <div class="workspace">
+      <aside class="sidebar sidebar--left">
+        <section class="panel" data-block="proceso">
+          <h2 class="panel-title">Proceso</h2>
+          <div class="btn-grid">
+            <button type="button" class="btn btn-start" data-action="start">Start</button>
+            <button type="button" class="btn btn-resume" data-action="resume">Reanudar</button>
+            <button type="button" class="btn btn-pause" data-action="pause">Pausa</button>
+            <button type="button" class="btn btn-stop" data-action="stop">Stop</button>
+          </div>
+          <div class="btn-grid btn-grid--process-reset">
+            <button type="button" class="btn btn-reset" data-action="reset">Reset</button>
+          </div>
+        </section>
+
+        <section class="panel" data-block="operacion_manual">
+          <h2 class="panel-title">Operación manual</h2>
+          <div class="btn-grid">
+            <button type="button" class="btn btn-manual" data-action="purga">Purga</button>
+            <button type="button" class="btn btn-manual" data-action="posicion_inicial">Posición inicial</button>
+          </div>
+        </section>
+      </aside>
+
+      <section class="center-hub" aria-label="Monitor de producción">
+        <div class="progress-block">
+          <div class="progress-block__header">
+            <span class="progress-block__title">Progreso de ciclo</span>
+            <span class="progress-block__pct" id="progressPct">0 %</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div class="metrics-grid">
+          <article class="metric-card metric-card--model">
+            <label class="metric-label" for="selectModelo">Número de modelo</label>
+            <select id="selectModelo" class="metric-select" aria-label="Seleccionar número de modelo">
+              <option value="">— Seleccionar —</option>
+            </select>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Longitud de modelo</span>
+            <span class="metric-value" id="metricLongitud">—</span>
+            <span class="metric-unit">mm</span>
+          </article>
+          <article class="metric-card">
+            <label class="metric-label" for="metricCantidad">Cantidad del lote</label>
+            <input type="number" min="1" step="1" id="metricCantidad" class="metric-input" value="1" inputmode="numeric" aria-label="Piezas del lote">
+            <span class="metric-unit">piezas</span>
+          </article>
+          <article class="metric-card">
+            <label class="metric-label" for="metricCompensacion">Compensación de medición</label>
+            <input type="number" step="0.01" id="metricCompensacion" class="metric-input" value="0" inputmode="decimal" aria-label="Compensación de medición en milímetros, positiva o negativa">
+            <span class="metric-unit">mm</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Tiempo de ciclo</span>
+            <span class="metric-value" id="metricTiempoCiclo">—</span>
+          </article>
+          <article class="metric-card metric-card--wide">
+            <span class="metric-label">Tiempo estimado / tiempo corriendo</span>
+            <div class="metric-dual">
+              <span class="metric-value" id="metricTiempoEstimado">—</span>
+              <span class="metric-sep">/</span>
+              <span class="metric-value metric-value--accent" id="metricTiempoCorriendo">—</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="sidebar sidebar--right">
+        <section class="panel panel--prefeeder" data-block="prealimentador">
+          <h2 class="panel-title">PreAlimentador</h2>
+          <div class="btn-grid">
+            <button type="button" class="btn btn-feeder" data-action="carga_material">Carga de material</button>
+            <button type="button" class="btn btn-feeder" data-action="iniciar">Iniciar</button>
+            <button type="button" class="btn btn-feeder" data-action="alimentar_izquierda">Alimentar izquierda</button>
+            <button type="button" class="btn btn-feeder" data-action="alimentar_derecha">Alimentar derecha</button>
+            <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_izquierda">Omitir holgura izquierda</button>
+            <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_derecha">Omitir holgura derecha</button>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <section class="events-block events-block--full" id="eventsPanel" hidden>
+      <h2 class="events-block__title">Eventos y mensajes</h2>
+      <ul class="events-list" id="eventsList" aria-live="polite"></ul>
+    </section>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal" hidden role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+    <div class="modal">
+      <header class="modal__header">
+        <h2 id="settingsModalTitle">Configuración de la aplicación</h2>
+        <button type="button" class="modal__close" id="settingsModalClose" aria-label="Cerrar">×</button>
+      </header>
+
+      <div class="modal__body" data-block="configuracion">
+        <p class="modal__hint">Parámetros, mantenimiento y checklist del equipo.</p>
+        <div class="btn-grid">
+          <button type="button" class="btn btn-config" data-action="parametros">Parámetros</button>
+          <button type="button" class="btn btn-config" data-action="mantenimiento">Mantenimiento</button>
+          <button type="button" class="btn btn-config" data-action="checklist">Checklist</button>
+        </div>
+
+        <div class="settings-divider" role="separator"></div>
+
+        <label class="settings-toggle">
+          <input type="checkbox" id="toggleEventsPanel">
+          <span class="settings-toggle__switch" aria-hidden="true"></span>
+          <span class="settings-toggle__text">
+            <strong>Eventos y mensajes</strong>
+            <small>Muestra el panel de registro en la pantalla principal</small>
+          </span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay modal-overlay--fullscreen" id="parametrosModal" hidden role="dialog" aria-modal="true" aria-labelledby="parametrosModalTitle">
+    <div class="parametros-shell">
+      <header class="modal__header parametros-shell__header">
+        <button type="button" class="modal__back" id="parametrosModalBack" aria-label="Volver a configuración">←</button>
+        <h2 id="parametrosModalTitle">Parámetros</h2>
+        <button type="button" class="modal__close" id="parametrosModalClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal__tabs modal__tabs--large" role="tablist" aria-label="Parámetros">
+        <button type="button" class="modal-tab is-active" role="tab" id="tabBtnCycle" aria-selected="true" aria-controls="tabPanelCycle" data-tab="cycle">Cycle</button>
+        <button type="button" class="modal-tab" role="tab" id="tabBtnMotion" aria-selected="false" aria-controls="tabPanelMotion" data-tab="motion">Motion</button>
+        <button type="button" class="modal-tab" role="tab" id="tabBtnPlc" aria-selected="false" aria-controls="tabPanelPlc" data-tab="plc">PLC</button>
+        <button type="button" class="modal-tab" role="tab" id="tabBtnConexion" aria-selected="false" aria-controls="tabPanelConexion" data-tab="conexion">Conexión</button>
+      </div>
+      <div class="parametros-shell__body">
+        <section class="tab-panel is-active" role="tabpanel" id="tabPanelCycle" aria-labelledby="tabBtnCycle" data-tab-panel="cycle">
+          <p class="modal__hint">Secuencia automática — pasos <strong>1 a 8</strong>. Los puertos COM se eligen en la pestaña Conexión.</p>
+          <ol class="cycle-steps" id="cycleStepsList" aria-label="Pasos del ciclo 1 a 8"></ol>
+          <form class="cycle-params" id="cycleParamsForm" autocomplete="off">
+            <h3 class="cycle-params__title">Tiempos fijos (ms)</h3>
+            <div class="cycle-params__grid">
+              <label class="motion-field">Holder / encoder
+                <input type="number" min="0" step="1" data-cycle-param="ms_holder_enc_stable">
+              </label>
+              <label class="motion-field">LM en corte
+                <input type="number" min="0" step="1" data-cycle-param="ms_lm_at_cut">
+              </label>
+              <label class="motion-field">LM en descarga
+                <input type="number" min="0" step="1" data-cycle-param="ms_lm_at_discharge">
+              </label>
+              <label class="motion-field">Cortadores ON
+                <input type="number" min="0" step="1" data-cycle-param="ms_cutter_on">
+              </label>
+              <label class="motion-field">Tras cortadores
+                <input type="number" min="0" step="1" data-cycle-param="ms_after_cutter">
+              </label>
+              <label class="motion-field">Tras pinzas
+                <input type="number" min="0" step="1" data-cycle-param="ms_after_grip_release">
+              </label>
+              <label class="motion-field">Retardo blower
+                <input type="number" min="0" step="1" data-cycle-param="ms_blower_delay">
+              </label>
+              <label class="motion-field">Fin en home
+                <input type="number" min="0" step="1" data-cycle-param="ms_at_home_end">
+              </label>
+            </div>
+            <h3 class="cycle-params__title">Depósito por montón</h3>
+            <p class="modal__hint">El corte es el largo de la pieza más el offset. Cada montón queda más lejos: el primero es el corte más la separación, y el paso al siguiente es el largo más esa separación. Carrera 0 no pausa para vaciar. Con ambos lados la cantidad del lote tiene que ser par.</p>
+            <div class="cycle-params__grid">
+              <label class="motion-field">Lados que alimentan
+                <select data-cycle-param="feed_sides">
+                  <option value="R">Derecho</option>
+                  <option value="L">Izquierdo</option>
+                  <option value="LR">Ambos</option>
+                </select>
+              </label>
+              <label class="motion-field">Corte (mm)
+                <input type="text" id="cycleCutMm" readonly placeholder="largo + offset">
+              </label>
+              <label class="motion-field">Offset de corte (mm)
+                <input type="number" step="0.01" data-cycle-param="cut_offset_mm" placeholder="0">
+              </label>
+              <label class="motion-field">Cortes por montón
+                <input type="number" min="1" step="1" data-cycle-param="deposit_batch_size">
+              </label>
+              <label class="motion-field">Separación (mm)
+                <input type="number" step="0.01" data-cycle-param="deposit_stack_gap_mm">
+              </label>
+              <label class="motion-field">Carrera máxima (mm)
+                <input type="number" min="0" step="0.01" data-cycle-param="deposit_max_travel_mm">
+              </label>
+              <label class="motion-field">Despeje de pinzas (mm)
+                <input type="number" min="0" step="0.01" data-cycle-param="gripper_clearance_mm">
+              </label>
+              <label class="motion-field">Blower ms / mm pieza
+                <input type="number" min="0" step="0.1" data-cycle-param="blower_ms_per_mm">
+              </label>
+            </div>
+            <button type="submit" class="btn btn-config">Guardar parámetros de ciclo</button>
+          </form>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="tabPanelMotion" aria-labelledby="tabBtnMotion" data-tab-panel="motion" hidden>
+          <p class="modal__hint">Cada botón arma la orden Serial del MCU Motion con los valores de esta pantalla. Guardar, inicializar, mover y jog envían primero <code>set_tune</code>. El feeder se edita en mm/s y mm. El LM Guide en mm se convierte a PUU (770 / 45, signo negativo).</p>
+          <form class="motion-params" id="motionTuneForm" autocomplete="off">
+            <div class="motion-params__actions">
+              <button type="button" class="btn btn-config" id="motionTuneReload">Recargar</button>
+              <button type="submit" class="btn btn-config">Guardar ajustes</button>
+            </div>
+            <p class="motion-params__serial-hint" id="motionEsp32Hint" hidden></p>
+
+            <div class="motion-params__grid">
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>Bloque de validación</legend>
+                <div class="motion-validate">
+                  <div class="motion-validate__row">
+                    <div class="motion-validate__id">
+                      <span class="motion-validate__mark" aria-hidden="true">R</span>
+                      <span class="motion-validate__name">Lado R</span>
+                    </div>
+                    <p class="motion-laser" id="laserLedR" role="status" aria-label="Láser lado R sin detección">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Láser</span>
+                      <span class="motion-laser__state">Sin detección</span>
+                    </p>
+                    <div class="motion-validate__enc">
+                      <span class="motion-validate__label">Encoder</span>
+                      <span class="motion-validate__value" id="encReadR">—</span>
+                    </div>
+                    <button type="button" class="btn btn-manual" data-motion-op="encoder_reset" data-motion-side="R">Reset contador</button>
+                  </div>
+                  <div class="motion-validate__row">
+                    <div class="motion-validate__id">
+                      <span class="motion-validate__mark" aria-hidden="true">L</span>
+                      <span class="motion-validate__name">Lado L</span>
+                    </div>
+                    <p class="motion-laser" id="laserLedL" role="status" aria-label="Láser lado L sin detección">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Láser</span>
+                      <span class="motion-laser__state">Sin detección</span>
+                    </p>
+                    <div class="motion-validate__enc">
+                      <span class="motion-validate__label">Encoder</span>
+                      <span class="motion-validate__value" id="encReadL">—</span>
+                    </div>
+                    <button type="button" class="btn btn-manual" data-motion-op="encoder_reset" data-motion-side="L">Reset contador</button>
+                  </div>
+                </div>
+              </fieldset>
+
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>Feeder CAN</legend>
+                <div class="motion-fieldset__actions">
+                  <button type="button" class="btn btn-feeder" data-motion-op="feeder_init">Inicializar</button>
+                </div>
+                <p class="motion-params__note motion-params__note--tight">Habilita los dos nodos CAN y escribe el perfil de velocidad (6081) con el valor de Velocidad de esta pantalla. El set-point 607A de arranque queda fijo en firmware (home lógico).</p>
+                <div class="motion-side">
+                  <p class="motion-side__title">Lado R</p>
+                  <div class="motion-fieldset__row">
+                    <label class="motion-field">Velocidad (mm/s)
+                      <input type="number" step="0.1" data-motion-path="feeder.R.profile_velocity_pps" data-motion-unit="feed_mms">
+                    </label>
+                    <label class="motion-field">Compensación (mm)
+                      <input type="number" step="0.01" data-motion-path="feeder.R.compensation_mm">
+                    </label>
+                  </div>
+                </div>
+                <div class="motion-side">
+                  <p class="motion-side__title">Lado L</p>
+                  <div class="motion-fieldset__row">
+                    <label class="motion-field">Velocidad (mm/s)
+                      <input type="number" step="0.1" data-motion-path="feeder.L.profile_velocity_pps" data-motion-unit="feed_mms">
+                    </label>
+                    <label class="motion-field">Compensación (mm)
+                      <input type="number" step="0.01" data-motion-path="feeder.L.compensation_mm">
+                    </label>
+                  </div>
+                </div>
+                <p class="motion-params__note motion-params__note--tight">Hasta el láser el alimentador corre solo en velocidad. Si FeedStage termina bien y la compensación no es 0, ese lado pasa a perfil de posición y recorre esos mm (3600 counts / 55 mm), a favor o en contra de la alimentación.</p>
+              </fieldset>
+
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>LM Guide</legend>
+                <div class="motion-fieldset__actions">
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_init">Inicializar</button>
+                  <button type="button" class="btn btn-manual" id="lmServoToggle" data-motion-op="lmguide_servo" aria-pressed="false">On / Off</button>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_home">Buscar Home</button>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_stop">Paro</button>
+                </div>
+                <p class="motion-params__note motion-params__note--tight">Inicializar enciende el servo. Buscar Home corre el homing del drive (10 rpm, método forward). Paro escribe P5.007 = 1000. El RPM de abajo es la velocidad de Mover y Jog.</p>
+                <div class="motion-fieldset__row motion-fieldset__row--narrow">
+                  <label class="motion-field">RPM
+                    <input type="number" step="0.1" min="0" data-motion-path="lmguide.pr_speed_rpm">
+                  </label>
+                </div>
+                <div class="motion-move">
+                  <label class="motion-field">Jog (mm)
+                    <input type="number" step="0.01" id="lmJogDeltaMm" value="1">
+                  </label>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_jog" data-motion-dir="1">Jog +</button>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_jog" data-motion-dir="-1">Jog −</button>
+                </div>
+                <p class="motion-params__note motion-params__note--tight">El jog no se guarda. Jog + avanza en mm hacia el corte (PUU más negativo).</p>
+                <div class="motion-move">
+                  <label class="motion-field">Posición (mm)
+                    <input type="number" step="0.01" id="lmMoveMm" data-motion-path="lmguide.pos_puu" data-motion-unit="mm" placeholder="mm">
+                  </label>
+                  <div class="motion-puu" aria-live="polite">
+                    <span class="motion-puu__label">PUU</span>
+                    <span class="motion-puu__value" id="lmMovePuu">0</span>
+                  </div>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_move">Mover</button>
+                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_move_home">Mover a home (0)</button>
+                </div>
+              </fieldset>
+
+              <fieldset class="motion-fieldset motion-fieldset--wide motion-fieldset--readonly">
+                <legend>Datos en ESP32 (NVS) — solo lectura</legend>
+                <div class="motion-fieldset__row">
+                  <label class="motion-field">Modelo
+                    <input type="text" readonly id="motionDataModelo">
+                  </label>
+                  <label class="motion-field">Longitud objetivo (mm)
+                    <input type="number" readonly id="motionDataTargetMm">
+                  </label>
+                  <label class="motion-field">Tolerancia (mm)
+                    <input type="number" readonly id="motionDataToleranceMm">
+                  </label>
+                </div>
+                <p class="motion-params__note">Se actualizan al elegir modelo en el monitor. Enviar al MCU con el puente Serial usando <code>esp32_line</code> de <code>/api/motion/data</code>.</p>
+              </fieldset>
+            </div>
+          </form>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="tabPanelPlc" aria-labelledby="tabBtnPlc" data-tab-panel="plc" hidden>
+          <p class="modal__hint">Controles manuales del MCU PLC. Cada On / Off manda un pulso a esa salida. El blower se mantiene el tiempo indicado.</p>
+          <form class="motion-params" id="plcManualForm" autocomplete="off">
+            <p class="motion-params__serial-hint" id="plcEsp32Hint" hidden></p>
+            <div class="motion-params__grid">
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>Salidas</legend>
+                <div class="motion-validate">
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Holder</p>
+                    <div class="motion-move">
+                      <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="holder" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Encoder</p>
+                    <div class="motion-move">
+                      <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="encoder" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Cutter R</p>
+                    <div class="motion-move">
+                      <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="cutter_r" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Cutter L</p>
+                    <div class="motion-move">
+                      <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="cutter_l" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Grippers</p>
+                    <div class="motion-move">
+                      <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="gripper" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                  <div class="motion-validate__row">
+                    <p class="motion-side__title">Blower</p>
+                    <div class="motion-move">
+                      <label class="motion-field">Tiempo (ms)
+                        <input type="number" id="plcBlowerMs" min="200" max="300000" step="1" value="2000">
+                      </label>
+                      <button type="button" class="btn btn-manual" data-plc-op="blower" aria-pressed="false">On / Off</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="motion-fieldset__actions">
+                  <button type="button" class="btn btn-manual" data-plc-op="all_off">Apagar salidas</button>
+                  <button type="button" class="btn btn-stop" data-plc-op="reset">Reset</button>
+                </div>
+                <p class="motion-params__note">Apagar salidas suelta el blower y pulsa en OFF cada válvula que esté activa. Reset corta los pulsos y da el pulso de reset.</p>
+              </fieldset>
+
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>Sensores de error</legend>
+                <div class="plc-faults">
+                  <span class="motion-laser plc-fault" id="plcFaultHolder" role="status">
+                    <span class="motion-laser__led" aria-hidden="true"></span>
+                    Holder
+                  </span>
+                  <span class="motion-laser plc-fault" id="plcFaultEncoder" role="status">
+                    <span class="motion-laser__led" aria-hidden="true"></span>
+                    Encoder
+                  </span>
+                  <span class="motion-laser plc-fault" id="plcFaultCutter" role="status">
+                    <span class="motion-laser__led" aria-hidden="true"></span>
+                    Cutter
+                  </span>
+                  <span class="motion-laser plc-fault" id="plcFaultGripper" role="status">
+                    <span class="motion-laser__led" aria-hidden="true"></span>
+                    Gripper
+                  </span>
+                </div>
+                <p class="motion-params__note" id="plcGraceNote" hidden>Arranque: las fallas se muestran al pasar 15 s.</p>
+              </fieldset>
+            </div>
+          </form>
+        </section>
+        <section class="tab-panel" role="tabpanel" id="tabPanelConexion" aria-labelledby="tabBtnConexion" data-tab-panel="conexion" hidden>
+          <p class="modal__hint">Elige el cable USB de cada módulo. Sin el COM correcto el ciclo no arranca.</p>
+          <div class="conexion-grid">
+            <article class="conexion-module">
+              <h3 class="conexion-module__title">Motion</h3>
+              <label class="motion-field" for="selectMotionPort">Puerto
+                <select id="selectMotionPort"></select>
+              </label>
+              <p class="conexion-module__status" id="serialMotionStatus" role="status"></p>
+              <button type="button" class="btn btn-config" id="btnMotionTest">Probar COM</button>
+            </article>
+            <article class="conexion-module">
+              <h3 class="conexion-module__title">PLC</h3>
+              <label class="motion-field" for="selectPlcPort">Puerto
+                <select id="selectPlcPort"></select>
+              </label>
+              <p class="conexion-module__status" id="serialPlcStatus" role="status"></p>
+              <button type="button" class="btn btn-config" id="btnPlcTest">Probar COM</button>
+            </article>
+            <article class="conexion-module">
+              <h3 class="conexion-module__title">Andon</h3>
+              <label class="motion-field" for="selectAndonPort">Puerto
+                <select id="selectAndonPort"></select>
+              </label>
+              <p class="conexion-module__status" id="serialAndonStatus" role="status"></p>
+              <button type="button" class="btn btn-config" id="btnAndonTest">Probar COM</button>
+            </article>
+          </div>
+          <button type="button" class="btn btn-config conexion-refresh" id="btnRefreshPorts">Actualizar puertos</button>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="checklistModal" hidden role="dialog" aria-modal="true" aria-labelledby="checklistModalTitle">
+    <div class="modal modal--wide">
+      <header class="modal__header">
+        <h2 id="checklistModalTitle">Revisión de arranque</h2>
+        <button type="button" class="modal__close" id="checklistModalClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal__body" id="checklistBody"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="mantModal" hidden role="dialog" aria-modal="true" aria-labelledby="mantModalTitle">
+    <div class="modal">
+      <header class="modal__header">
+        <h2 id="mantModalTitle">Mantenimiento</h2>
+        <button type="button" class="modal__close" id="mantModalClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal__body">
+        <p class="modal__hint" id="mantCounter">Ciclos desde el último reset: 0</p>
+        <p class="modal__hint">A los 10 000 ciclos la revisión de arranque no deja continuar hasta resetear este contador.</p>
+        <label class="modal-field" for="mantEmpleado">Empleado (5 dígitos)
+          <input id="mantEmpleado" inputmode="numeric" maxlength="5" autocomplete="off">
+        </label>
+        <button type="button" class="btn btn-config" id="mantReset">Resetear contador</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="empleadoModal" hidden role="dialog" aria-modal="true" aria-labelledby="empleadoModalTitle">
+    <div class="modal">
+      <header class="modal__header">
+        <h2 id="empleadoModalTitle">Número de empleado</h2>
+        <button type="button" class="modal__close" id="empleadoModalClose" aria-label="Cerrar">×</button>
+      </header>
+      <div class="modal__body">
+        <p class="modal__hint">Cinco dígitos. Queda en el registro de la acción.</p>
+        <label class="modal-field" for="empleadoInput">Empleado
+          <input id="empleadoInput" inputmode="numeric" maxlength="5" autocomplete="off">
+        </label>
+        <button type="button" class="btn btn-config" id="empleadoConfirm">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <button type="button" class="theme-toggle" id="themeToggle" aria-label="Activar modo claro">
+    <span class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true">☀</span>
+    <span class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true">☽</span>
+  </button>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

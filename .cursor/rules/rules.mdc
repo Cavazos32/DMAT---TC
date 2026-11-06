@@ -1,0 +1,572 @@
+---
+description: Cortadora de tubo — Firmware y lógica de control (rules.md v0.5)
+alwaysApply: true
+---
+
+# rules.md
+# Cortadora de tubo — Firmware y lógica de control
+
+**Estado del documento:** Borrador — v0.5  
+**Proyecto:** Cortadora de tubo dual / espejo  
+**Requisito principal:** Tolerancia de corte de ±2 mm por lado  
+**Alcance:** Firmware, responsabilidades de los MCU, secuencias de control, comunicación y reglas de desarrollo de software.
+
+---
+
+# 1. Objetivo del proyecto
+
+Desarrollar el firmware y la lógica de control de una máquina cortadora de tubo dual/espejo.
+
+La máquina debe alimentar, medir, posicionar y cortar el material de acuerdo con una secuencia definida.
+
+El firmware debe priorizar:
+
+- Ejecución simple y predecible.
+- Posicionamiento y medición precisos.
+- Tiempos de ciclo deterministas.
+- Comunicación confiable entre MCU.
+- Separación clara de responsabilidades.
+- Facilidad de depuración y mantenimiento.
+- Uso eficiente de los recursos del microcontrolador.
+- Ausencia de complejidad de software innecesaria.
+
+**Tolerancia de corte requerida:** ±2 mm por lado.
+
+**Tiempo de ciclo de referencia:** aproximadamente 2.6 segundos, dependiendo de la longitud del tubo y de la duración de los movimientos.
+
+Este tiempo sirve como referencia para evaluar el tráfico de comunicación y la ejecución del firmware. No autoriza a modificar los retardos ni los parámetros definidos para el ciclo.
+
+# 2. Arquitectura del sistema
+
+La máquina estará compuesta por tres MCU independientes:
+
+| MCU | Responsabilidad |
+|---|---|
+| MCU Motion | Control de servos, alimentación, medición mediante encoders, detección por láser y posicionamiento del LM Guide. |
+| MCU PLC | Control de salidas, interfaz con el PLC físico y lectura de señales de error. |
+| MCU Andon | Indicación del estado de la máquina. |
+
+## 2.1 MCU Motion
+
+Responsable de todas las operaciones relacionadas con movimiento.
+
+### Hardware y comunicación
+
+- **CAN Bus:** controla los servos de alimentación izquierdo (L) y derecho (R).
+- **Modbus:** controla el servo del LM Guide.
+- **Encoder L:** mide el material alimentado por el servo CAN izquierdo.
+- **Encoder R:** mide el material alimentado por el servo CAN derecho.
+- **Láser L:** detecta la presencia y el borde del tubo del lado izquierdo.
+- **Láser R:** detecta la presencia y el borde del tubo del lado derecho.
+
+Los servos CAN se inicializan únicamente durante el encendido de la máquina. Durante los ciclos normales, el MCU Motion solamente envía las órdenes de movimiento necesarias; no vuelve a inicializar los servos en cada ciclo.
+
+**Importante:** Los encoders miden únicamente el material alimentado por los servos CAN. No miden el movimiento del LM Guide.
+
+### Responsabilidades principales
+
+1. Alimentar el tubo.
+2. Detectar el borde del tubo mediante el láser correspondiente a cada lado.
+3. Detener el servo de alimentación correspondiente.
+4. Leer el encoder correspondiente.
+5. Validar la longitud medida contra la longitud objetivo y la tolerancia de cada lado.
+6. Posicionar el LM Guide para el corte.
+7. Posicionar el LM Guide para descargar la pieza.
+8. Regresar el LM Guide a posición de origen (home).
+
+## 2.2 MCU PLC
+
+Responsable de activar salidas GPIO que se conectan a las entradas del PLC físico y de recibir las señales de error provenientes de dicho PLC.
+
+El PLC físico coordina las válvulas neumáticas y la lógica asociada de la máquina.
+
+### Salidas GPIO
+
+| Salida | Descripción |
+|---|---|
+| Holder Dual | Activación de los holders de ambos lados. |
+| Encoder Dual | Activación de los encoders de ambos lados, según la lógica del PLC físico. |
+| Cutter R | Activación del cortador derecho. |
+| Cutter L | Activación del cortador izquierdo. |
+| Grippers Dual | Activación de las pinzas de ambos lados. |
+| Blower Dual | Activación de los sopladores de ambos lados. |
+
+### Entradas de error provenientes del PLC físico
+
+El MCU PLC recibe las siguientes señales de error:
+
+- Holder Error.
+- Encoder Error.
+- Cutter R/L Error.
+- Gripper Error.
+
+El PLC físico es el origen de estas señales. El MCU PLC debe leerlas y tratarlas de acuerdo con la lógica de la máquina.
+
+La polaridad eléctrica y el detalle de lectura de estas señales quedan pendientes.
+
+### Controles manuales para depuración
+
+Se requieren generalmente seis controles manuales:
+
+1. Holder.
+2. Encoder.
+3. Cutter R.
+4. Cutter L.
+5. Grippers Dual.
+6. Blower Dual.
+
+Los controles manuales permiten probar las salidas individualmente.
+
+Durante el ciclo automático, las salidas que deban trabajar en conjunto se ordenarán en conjunto. En particular, Holder y Encoder se activan juntos al inicio y se desactivan juntos en la etapa correspondiente.
+
+La independencia de los controles manuales no implica que deban activarse por separado durante el ciclo automático.
+
+### Comportamiento de GPIO
+
+Durante el ciclo de la máquina, las salidas GPIO se actualizan de acuerdo con el estado de activación requerido.
+
+- Mantener un estado mientras siga siendo necesario.
+- Actualizar una salida únicamente cuando su estado solicitado cambie.
+- Evitar escrituras o transmisiones repetitivas que no aporten un cambio.
+- No duplicar estados ni mantener copias independientes de una misma salida.
+- Los controles manuales de depuración permanecerán disponibles/activos; se instalarán dentro de una ventana protegida. No se agregará un bloqueo de firmware adicional únicamente para impedir su uso durante el ciclo.
+
+## 2.3 MCU Andon
+
+Responsable de indicar el estado de la máquina.
+
+Estados identificados:
+
+- Simple.
+- Trabajando.
+- Error.
+- Materialista.
+- Terminado.
+
+La palabra **“Materialista”** se conserva tal como fue indicada y queda pendiente confirmar si corresponde al nombre definitivo del estado o si se refiere a “material listo”.
+
+El Andon debe considerar que los dos lados pueden terminar en momentos diferentes. El estado general no debe asumir que L y R terminan simultáneamente.
+
+La conexión del MCU Andon con los demás controladores está contemplada, pero el protocolo y el detalle de intercambio quedan pendientes.
+
+# 3. MCU Motion — Bloques funcionales
+
+El MCU Motion tiene dos bloques funcionales principales.
+
+## Bloque 1 — Alimentación y medición del material
+
+**Objetivo:** Alimentar cada lado hasta que su láser detecte el borde del tubo, detener el alimentador correspondiente y validar la longitud medida.
+
+Secuencia por lado:
+
+1. Activar el servo CAN correspondiente.
+2. Alimentar el tubo.
+3. Monitorear el láser correspondiente.
+4. Cuando el láser de ese lado se active:
+   - Detener inmediatamente el servo correspondiente.
+   - Leer el encoder correspondiente.
+5. Comparar la medición del encoder contra la longitud objetivo común.
+6. Validar la medición con la tolerancia de ±2 mm correspondiente a ese lado.
+
+Condición de aceptación por lado:
+
+`Laser_L ON && Encoder_L Within Tolerance`
+
+`Laser_R ON && Encoder_R Within Tolerance`
+
+La longitud objetivo es un único parámetro compartido por ambos lados, pero la tolerancia se evalúa independientemente para L y R.
+
+Los dos servos reciben la orden de movimiento al mismo tiempo. Cada lado se detiene y valida independientemente cuando detecta su láser. Si un lado termina primero, permanece detenido y espera al otro. La máquina avanza únicamente cuando ambos lados han completado y validado su alimentación.
+
+Si un láser no se activa o la medición queda fuera de tolerancia, se considera una condición de error. El comportamiento general ante error se define en la sección de manejo de errores.
+
+**Importante:** La lectura del encoder debe corresponder al movimiento real del alimentador del lado correspondiente.
+
+## Bloque 2 — Posicionamiento del LM Guide
+
+**Objetivo:** Posicionar el LM Guide para corte, descarga y regreso.
+
+Secuencia:
+
+1. Mover el LM Guide a la posición de corte (`X_CUT`).
+2. Esperar 100 ms.
+3. Mover el LM Guide a la posición de descarga (`X_DISCHARGE`).
+4. Esperar 100 ms.
+5. Regresar el LM Guide a home (`X_HOME`).
+
+Las posiciones son parámetros lógicos, no valores codificados directamente en diferentes partes del firmware.
+
+Sus valores reales quedan pendientes de definición.
+
+El control y la confirmación de posición se realizarán mediante Modbus. El detalle de comandos y confirmaciones se definirá posteriormente.
+
+El LM Guide es compartido por ambos lados.
+
+# 4. Ciclo automático de la máquina
+
+La siguiente es la secuencia definida hasta el momento.
+
+## 4.1 Estado inicial
+
+- La máquina recibe la orden Start.
+- Comienza la secuencia automática.
+
+## 4.2 Activación de Holder y Encoder
+
+1. Activar Holder Dual.
+2. Activar Encoder Dual.
+3. Esperar 100 ms.
+
+Ambas salidas deben activarse juntas.
+
+## 4.3 Alimentación del material
+
+1. Iniciar la alimentación de L y R mediante sus respectivos servos CAN.
+2. Monitorear ambos láseres.
+3. Cuando el láser de un lado se active:
+   - Detener inmediatamente el servo de ese lado.
+   - Leer el encoder de ese lado.
+   - Validar la longitud de ese lado.
+4. Mantener el otro lado en su proceso de alimentación si todavía no ha terminado.
+5. Continuar únicamente cuando ambos lados hayan validado correctamente.
+
+Condiciones de aceptación:
+
+`Laser_L ON && Encoder_L Within Tolerance`
+
+`Laser_R ON && Encoder_R Within Tolerance`
+
+Si cualquiera de los lados presenta un error, la máquina no debe avanzar como si ambos lados fueran válidos.
+
+Los lados trabajan con la misma longitud objetivo y se espera que terminen en conjunto; no se contempla una operación normal en que un lado termine permanentemente después del otro. Aun así, la lógica de validación por lado se mantiene independiente.
+
+## 4.4 Activación de pinzas y liberación de Holder
+
+1. Activar Grippers Dual.
+2. Desactivar Holder Dual.
+3. Desactivar Encoder Dual.
+4. Esperar 100 ms.
+
+## 4.5 Posición de corte
+
+1. Mover el LM Guide a la posición de corte.
+2. Esperar 100 ms.
+
+## 4.6 Corte
+
+1. Activar Cutter R.
+2. Activar Cutter L.
+3. Mantener la activación durante 50 ms.
+4. Transcurridos los 50 ms, desactivar Cutter R y Cutter L.
+5. Esperar 100 ms.
+
+## 4.7 Descarga de la pieza
+
+1. Mover el LM Guide a la posición de descarga.
+2. Esperar 100 ms.
+3. Desactivar Grippers Dual.
+4. Esperar 100 ms.
+
+La liberación del gripper es la condición de referencia para iniciar la siguiente alimentación cuando se habilite el funcionamiento en paralelo.
+
+## 4.8 Regreso a home y activación del blower
+
+1. Ordenar al LM Guide regresar a home / posición cero.
+2. Iniciar el conteo de 200 ms cuando comience el movimiento de regreso.
+3. Después de 200 ms, activar Blower Dual.
+4. La duración de activación del blower corresponde a la longitud programada de la pieza.
+5. El tiempo de activación del blower depende de la longitud de la pieza, no de la llegada del LM Guide a home.
+6. Esperar a que el LM Guide llegue a home.
+7. Esperar 50 ms.
+8. Finalizar el ciclo cuando se hayan completado las condiciones correspondientes.
+
+El retardo de activación de 200 ms y la duración dependiente de la longitud de la pieza son requisitos definidos y no deben modificarse silenciosamente.
+
+# 5. Manejo de errores y pausa
+
+Se consideran condiciones de error, como mínimo:
+
+- El láser de un lado no se activa durante la alimentación.
+- La medición del encoder de un lado queda fuera de tolerancia.
+- Falla la comunicación Modbus con el servo del LM Guide.
+- Se activa cualquiera de las señales de error recibidas desde el PLC físico.
+
+**Comportamiento definido:** ante un error, la máquina debe entrar en estado de pausa.
+
+El comportamiento definido es el siguiente:
+
+- Un error pausa el proceso; no aborta ni reinicia el ciclo.
+- La ejecución queda detenida en el punto donde se encontraba.
+- Las condiciones de seguridad estarán vinculadas a las señales de error correspondientes; no se manejarán como un sistema paralelo independiente.
+- La condición que originó el error debe restablecerse antes de permitir la liberación del estado de error.
+- Se requiere una orden de RESET para limpiar el estado de error.
+- Después del RESET, si ya no existen errores activos, la secuencia continúa desde el punto donde quedó pausada, sin regresar automáticamente al inicio.
+- Si permanece cualquier error activo, la máquina continúa en pausa.
+- El RESET del error no equivale a reiniciar el ciclo.
+
+Los tiempos de espera necesarios para detectar el restablecimiento de una condición se definirán según la señal correspondiente. No se agregarán retardos arbitrarios.
+
+Las salidas que deben conservarse o desactivarse durante cada tipo de pausa todavía deben definirse. No se debe asumir que pausar equivale a apagar indiscriminadamente todas las salidas.
+
+# 6. Reglas de desarrollo del firmware
+
+Estas reglas aplican a los tres MCU.
+
+## 6.1 Simplicidad lógica
+
+- La lógica debe ser tan sencilla como el uso de compuertas lógicas.
+- Preferir condiciones directas, rutas cortas y secuencias claras.
+- Implementar únicamente la funcionalidad requerida.
+- No introducir abstracciones innecesarias.
+- No crear funciones adicionales sin una razón real.
+- Evitar anidamientos excesivos de funciones.
+- No crear funciones que únicamente llamen a otra función que finalmente ejecuta la operación original.
+- Cada función debe tener una responsabilidad clara.
+- No crear nuevos ciclos o bucles si la secuencia existente puede resolver el comportamiento requerido.
+
+## 6.2 Reversión de cambios no funcionales
+
+- Todo cambio que no aporte una mejora funcional necesaria debe revertirse.
+- No conservar refactorizaciones, reorganizaciones o modificaciones cosméticas únicamente porque se hicieron.
+- Una modificación no funcional solo podrá conservarse si se demuestra que es el ajuste final indispensable para completar correctamente la solución.
+- No acumular cambios sin beneficio comprobable.
+
+## 6.3 Organización de archivos
+
+- Evitar la generación excesiva de archivos `.cpp` y `.h`.
+- No dividir el firmware en múltiples archivos únicamente para aparentar una mejor arquitetura.
+- Agrupar el código relacionado cuando esto mantenga la lectura y el mantenimiento simples.
+- Crear archivos separados solamente cuando exista una responsabilidad claramente diferenciada o una necesidad técnica real.
+- La cantidad de archivos no es un indicador de calidad.
+
+## 6.4 Uso de ESP32, núcleos y FreeRTOS
+
+- El MCU previsto es un ESP32-WROOM con dos núcleos; el modelo/revisión exactos quedan por confirmar.
+- Aprovechar los recursos del ESP32 cuando aporten una ventaja real.
+- Utilizar los núcleos disponibles y FreeRTOS para distribuir tareas cuando corresponda.
+- La cantidad y distribución de tareas se decidirá según los requerimientos reales, no por imponer una tarea para cada función.
+- Evitar bloquear una tarea con operaciones que impidan atender otras responsabilidades de tiempo crítico.
+- Definir prioridades y comunicación entre tareas de acuerdo con la importancia real de cada operación.
+- No crear tareas por separado sin necesidad.
+- Evitar competencia innecesaria por CPU, memoria, buses y periféricos.
+
+La distribución concreta de tareas y núcleos se definirá durante el diseño del firmware. La mayoría de las operaciones del control puede tener requisitos temporales importantes; las prioridades se asignarán según criticidad y no se asumirán todas idénticas.
+
+## 6.5 Uso eficiente de recursos y comunicación
+
+- Evitar saturar los MCU y los canales de comunicación.
+- Actualizar estados únicamente cuando sea necesario.
+- Solicitar únicamente la información que se necesita y en el momento en que se necesita.
+- Evitar consultas repetitivas que no aporten información nueva.
+- Evitar transmisiones periódicas si el estado no requiere actualización periódica.
+- Las actualizaciones visuales que no sean críticas no deben saturar el sistema.
+
+Ejemplo: si actualizar un LED o indicador de pantalla continuamente genera tráfico o carga innecesaria, se debe preferir una actualización bajo demanda mediante un botón.
+
+Puede haber excepciones cuando una actualización en tiempo real sea funcionalmente necesaria. Esas excepciones se definirán explícitamente.
+
+## 6.6 Fuente única de verdad
+
+- Cada parámetro debe tener una única definición autoritativa.
+- No duplicar parámetros en diferentes archivos o módulos.
+- No mantener varias copias independientes del mismo estado de máquina.
+- Los valores compartidos deben consultarse desde su fuente definida.
+- Modificar un parámetro no debe requerir actualizar varios lugares sin relación entre sí.
+
+## 6.7 Parámetros
+
+- Los parámetros deben ser visibles e identificables.
+- Los tiempos deben estar definidos explícitamente.
+- Las posiciones deben estar definidas explícitamente.
+- Las tolerancias deben estar definidas explícitamente.
+- No utilizar ajustes de tiempo ocultos.
+- No agregar desplazamientos arbitrarios.
+- No agregar factores de compensación sin documentarlos y justificarlos.
+
+Parámetros identificados hasta el momento:
+
+| Parámetro | Valor inicial |
+|---|---:|
+| Tolerancia de corte por lado | ±2 mm |
+| Espera de estabilización Holder/Encoder | 100 ms |
+| Espera en posición de corte del LM Guide | 100 ms |
+| Espera en posición de descarga del LM Guide | 100 ms |
+| Tiempo de activación de cortadores | 50 ms |
+| Espera después de liberar cortadores | 100 ms |
+| Espera después de liberar pinzas | 100 ms |
+| Retardo de activación del blower | 200 ms |
+| Espera final en home | 50 ms |
+
+## 6.8 Integridad de tiempos
+
+- Respetar la secuencia definida del ciclo.
+- No sacrificar tiempos esenciales para compensar problemas de firmware.
+- No agregar retardos arbitrarios para ocultar problemas de comunicación o sincronización.
+- No modificar parámetros de tiempo sin una decisión de ingeniería explícita.
+- La comunicación debe diseñarse para soportar el ciclo de referencia de aproximadamente 2.6 segundos.
+
+## 6.9 Nombres de funciones
+
+Los nombres de las funciones deben describir la operación real.
+
+Evitar nombres innecesariamente elaborados como:
+
+`STOP_MOTOR_URGENT_NOCHOICE()`
+
+cuando la operación real es simplemente:
+
+`StopMotor()`
+
+No introducir niveles artificiales de nombres o envolturas que no agreguen funcionalidad.
+
+## 6.10 No agregar funciones no solicitadas
+
+- No inventar funciones adicionales de la máquina.
+- No introducir modos de operación innecesarios.
+- No agregar rutas alternativas de ejecución sin un requisito definido.
+- No implementar funcionalidades especulativas.
+
+Si un requisito no puede implementarse correctamente sin agregar una función o mecanismo, primero se debe explicar por qué es necesario.
+
+# 7. Comunicación y ejecución
+
+La máquina utiliza varios MCU y protocolos de comunicación.
+
+El firmware debe considerar el tráfico de comunicación y los tiempos de ejecución.
+
+La comunicación entre controladores debe limitarse a la información indispensable: estados generales, peticiones y respuestas necesarias. No todos los MCU necesitan conocer cada detalle interno de los demás.
+
+Interfaces identificadas:
+
+| Origen | Destino | Interfaz | Propósito |
+|---|---|---|---|
+| MCU Motion | Servo alimentador L/R | CAN Bus | Control de alimentación |
+| MCU Motion | Servo LM Guide | Modbus | Control de posición |
+| MCU Motion | Encoder L/R | Interfaz de hardware | Medición de alimentación |
+| MCU Motion | Láser L/R | Entradas digitales | Detección del borde |
+| MCU PLC | PLC físico | GPIO de salida | Activación de salidas |
+| PLC físico | MCU PLC | GPIO de entrada | Señales de error |
+| MCU Andon | MCU de control | Por definir | Estado de máquina |
+
+La topología y el protocolo de comunicación entre MCU todavía no están definidos. El ciclo automático será coordinado por otro controlador, cuya identidad y responsabilidades se especificarán posteriormente. Por lo tanto, no se debe asumir que MCU Motion y MCU PLC coordinan directamente todo el ciclo ni que Andon recibe información directamente de ambos.
+
+La frecuencia de comunicación, estructura de mensajes, comportamiento ante tiempos de espera agotados (timeout) e interfaces entre MCU todavía no están definidos.
+
+Deben establecerse sin incrementar innecesariamente el tiempo de ciclo.
+
+# 8. Ejecución condicional y operación en paralelo
+
+La máquina requerirá eventualmente rutas especiales de ejecución.
+
+Requisito identificado:
+
+Al llegar a la etapa de apertura/liberación de pinzas, se podrá iniciar nuevamente la acción del Bloque 1 en paralelo con la continuación de la secuencia existente.
+
+Comportamiento esperado:
+
+- La condición que habilita esta repetición todavía debe definirse.
+- La acción de alimentación debe comenzar desde el paso inicial del Bloque 1.
+- La ejecución debe continuar hasta que el Bloque 1 complete y valide correctamente ambos lados.
+- Esta ejecución debe integrarse en la secuencia existente.
+- No crear un segundo ciclo independiente.
+- No introducir un nuevo bucle permanente.
+- No duplicar la secuencia inicial.
+- Reutilizar las acciones y parámetros existentes.
+- Mantener la sincronización necesaria antes de ejecutar una etapa que requiera que ambos bloques estén completos.
+
+La implementación exacta de la concurrencia y el punto de sincronización se definirá cuando se especifique la condición de repetición.
+
+# 9. Alcance actual
+
+El alcance inmediato del desarrollo es:
+
+1. Definir la arquitectura del firmware.
+2. Definir las responsabilidades de cada MCU.
+3. Definir la secuencia del MCU Motion.
+4. Definir las salidas y controles manuales de depuración del MCU PLC.
+5. Definir el ciclo automático.
+6. Definir la comunicación entre MCU.
+7. Garantizar una ejecución determinista y respetar los tiempos del ciclo.
+8. Establecer un manejo claro de errores.
+9. Aprovechar adecuadamente los recursos del ESP32 y FreeRTOS.
+10. Evitar saturación por consultas, actualizaciones o transmisiones innecesarias.
+
+El diseño mecánico, dimensionamiento neumático, cálculos estructurales y otros temas de diseño de máquina quedan fuera del alcance actual, salvo cuando afecten directamente el comportamiento del firmware.
+
+# 10. Definiciones pendientes
+
+La siguiente información debe aclararse antes de cerrar la especificación del firmware.
+
+## Motion
+
+- Unidad exacta del encoder y conversión a milímetros.
+- Valores de las posiciones del LM Guide.
+- Comandos Modbus y forma de confirmar la llegada a posición.
+- Comportamiento exacto de los servos ante error.
+- Detalle de la detección del láser y condiciones eléctricas.
+- Condición de repetición del Bloque 1 durante la liberación de pinzas.
+
+## PLC
+
+- Polaridad eléctrica de las entradas y salidas.
+- Comportamiento de cada salida durante pausa.
+- Qué salidas deben conservarse o desactivarse ante cada tipo de error.
+- Condiciones para permitir reanudar el ciclo.
+- Detalle de los seis controles manuales y sus restricciones durante el modo automático.
+
+## Andon
+
+Estados confirmados:
+
+- Simple.
+- Trabajando.
+- Error.
+- Falta material.
+- Terminado.
+
+El Andon mostrará el estado general de la máquina, no estados individuales L/R. Los dos lados se consideran sincronizados y terminan en conjunto.
+
+Queda pendiente definir el protocolo e intercambio de estados con el MCU que coordine el ciclo.
+
+## Ciclo
+
+- Definir qué salidas se conservan y cuáles se desactivan durante cada tipo de pausa.
+- Definir las condiciones exactas de restablecimiento y el tiempo de espera aplicable antes de aceptar que el error desapareció.
+- Definir la condición de finalización del ciclo cuando el blower y el regreso a home concluyen en momentos distintos.
+- Definir el detalle de la condición que habilita la siguiente alimentación en paralelo.
+
+# 11. Principio de desarrollo del proyecto
+
+**Simple. Directo. Funcional. Eficiente. Mantenible.**
+
+El firmware debe implementar los requisitos reales de la máquina, no compensar requisitos mal definidos mediante complejidad de software adicional.
+
+Cuando aparezca un problema:
+
+1. Identificar su causa real.
+2. Determinar qué MCU u operación es responsable.
+3. Corregir la implementación responsable.
+4. Conservar los parámetros y tiempos definidos del ciclo.
+5. Revertir los cambios que no aporten una mejora funcional necesaria.
+6. Evitar introducir funcionalidad innecesaria.
+7. Verificar que la solución no genere carga, tráfico o archivos innecesarios.
+
+Cualquier cambio que modifique la secuencia, los tiempos, los parámetros o las responsabilidades debe revisarse explícitamente antes de implementarse.
+
+**Este documento es la especificación autoritativa del proyecto. Las nuevas decisiones deben incorporarse aquí para mantener una única fuente de verdad.**
+
+# 12. Control y autorización del documento
+
+Este documento es la referencia oficial de las reglas, definiciones y decisiones del proyecto. Su contenido no puede modificarse de manera autónoma.
+
+- **Toda modificación requiere autorización explícita del usuario.**
+- Agregar un paso, cambiar una secuencia, corregir una lógica, modificar un parámetro, incorporar una función, alterar una responsabilidad o cambiar cualquier regla requiere autorización previa.
+- Una observación, recomendación o propuesta del asistente no constituye autorización para modificar el documento.
+- Si durante el análisis se detecta una corrección necesaria, primero debe presentarse al usuario y esperar su aprobación.
+- No se deben incorporar cambios por iniciativa propia, aunque parezcan obvios, convenientes o técnicamente mejores.
+- La autorización puede ser una solicitud directa de modificación o una aprobación explícita de un cambio propuesto.
+- Mientras se esté construyendo inicialmente el documento, se podrán organizar e incorporar las decisiones que el usuario vaya confirmando. Una vez que el usuario indique que esta etapa de construcción terminó, esta regla de autorización será obligatoria para todas las revisiones posteriores.
+- Cada modificación autorizada debe reflejarse en la versión del documento y conservar la consistencia de la fuente única de verdad.
+
+**El asistente no tiene autoridad autónoma para decidir ni aplicar cambios a `rules.md`. La autoridad de aprobación y modificación corresponde exclusivamente al usuario.**
+
