@@ -1,4 +1,7 @@
 {
-  "motion": "",
-  "plc": ""
+  "_todo_andon_skip": "ANDON_SKIP_OPCIONAL — borrar esta clave y andon_disabled cuando el Andon sea obligatorio",
+  "motion": "COM8",
+  "plc": "COM16",
+  "andon": "",
+  "andon_disabled": true
 }

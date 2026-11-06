@@ -250,10 +250,11 @@
           </form>
         </section>
         <section class="tab-panel" role="tabpanel" id="tabPanelMotion" aria-labelledby="tabBtnMotion" data-tab-panel="motion" hidden>
-          <p class="modal__hint">Cada botón arma la orden Serial del MCU Motion con los valores de esta pantalla. Guardar, inicializar, mover y jog envían primero <code>set_tune</code>. El feeder se edita en mm/s y mm. El LM Guide en mm se convierte a PUU (770 / 45, signo negativo).</p>
+          <p class="modal__hint">Cada acción envía solamente la orden necesaria. Mover y Jog incluyen su RPM en la misma orden, sin agregar <code>set_tune</code>. El feeder se edita en mm/s y mm. El LM Guide en mm se convierte a PUU (770 / 45, signo negativo).</p>
           <form class="motion-params" id="motionTuneForm" autocomplete="off">
             <div class="motion-params__actions">
               <button type="button" class="btn btn-config" id="motionTuneReload">Recargar</button>
+              <button type="button" class="btn btn-config" id="motionStatusRefresh">Actualizar estado</button>
               <button type="submit" class="btn btn-config">Guardar ajustes</button>
             </div>
             <p class="motion-params__serial-hint" id="motionEsp32Hint" hidden></p>
@@ -300,9 +301,10 @@
               <fieldset class="motion-fieldset motion-fieldset--wide">
                 <legend>Feeder CAN</legend>
                 <div class="motion-fieldset__actions">
-                  <button type="button" class="btn btn-feeder" data-motion-op="feeder_init">Inicializar</button>
+                  <button type="button" class="btn btn-feeder" data-motion-op="motion_hw_init">Init hardware</button>
+                  <button type="button" class="btn btn-feeder btn-feeder--secondary" data-motion-op="feeder_init">Solo CAN</button>
                 </div>
-                <p class="motion-params__note motion-params__note--tight">Habilita los dos nodos CAN y escribe el perfil de velocidad (6081) con el valor de Velocidad de esta pantalla. El set-point 607A de arranque queda fijo en firmware (home lógico).</p>
+                <p class="motion-params__note motion-params__note--tight"><strong>Init hardware</strong> envía un solo bloque al firmware: CAN + alimentadores L/R + encendido y home del LM Guide. <strong>Solo CAN</strong> inicializa únicamente los feeders. El perfil 6081 usa la Velocidad de esta pantalla; el set-point 607A de arranque queda fijo en firmware.</p>
                 <div class="motion-side">
                   <p class="motion-side__title">Lado R</p>
                   <div class="motion-fieldset__row">
@@ -312,6 +314,7 @@
                     <label class="motion-field">Compensación (mm)
                       <input type="number" step="0.01" data-motion-path="feeder.R.compensation_mm">
                     </label>
+                    <button type="button" class="btn btn-manual" data-motion-op="feeder_test" data-motion-side="R">Test R</button>
                   </div>
                 </div>
                 <div class="motion-side">
@@ -323,20 +326,20 @@
                     <label class="motion-field">Compensación (mm)
                       <input type="number" step="0.01" data-motion-path="feeder.L.compensation_mm">
                     </label>
+                    <button type="button" class="btn btn-manual" data-motion-op="feeder_test" data-motion-side="L">Test L</button>
                   </div>
                 </div>
-                <p class="motion-params__note motion-params__note--tight">Hasta el láser el alimentador corre solo en velocidad. Si FeedStage termina bien y la compensación no es 0, ese lado pasa a perfil de posición y recorre esos mm (3600 counts / 55 mm), a favor o en contra de la alimentación.</p>
+                <p class="motion-params__note motion-params__note--tight">Test cierra Holder Dual y Encoder Dual y ejecuta FeedStage solo para ese lado con la velocidad y compensación seleccionadas. Hasta el láser el alimentador corre solo en velocidad. Si FeedStage termina bien y la compensación no es 0, ese lado pasa a perfil de posición y recorre esos mm (3600 counts / 55 mm), a favor o en contra de la alimentación.</p>
               </fieldset>
 
               <fieldset class="motion-fieldset motion-fieldset--wide">
                 <legend>LM Guide</legend>
                 <div class="motion-fieldset__actions">
-                  <button type="button" class="btn btn-manual" data-motion-op="lmguide_init">Inicializar</button>
                   <button type="button" class="btn btn-manual" id="lmServoToggle" data-motion-op="lmguide_servo" aria-pressed="false">On / Off</button>
                   <button type="button" class="btn btn-manual" data-motion-op="lmguide_home">Buscar Home</button>
                   <button type="button" class="btn btn-manual" data-motion-op="lmguide_stop">Paro</button>
                 </div>
-                <p class="motion-params__note motion-params__note--tight">Inicializar enciende el servo. Buscar Home corre el homing del drive (10 rpm, método forward). Paro escribe P5.007 = 1000. El RPM de abajo es la velocidad de Mover y Jog.</p>
+                <p class="motion-params__note motion-params__note--tight">On / Off controla el servo. Buscar Home corre el homing del drive (10 rpm, método forward). Paro interrumpe inmediatamente el movimiento actual. El RPM de abajo es la velocidad de Mover y Jog.</p>
                 <div class="motion-fieldset__row motion-fieldset__row--narrow">
                   <label class="motion-field">RPM
                     <input type="number" step="0.1" min="0" data-motion-path="lmguide.pr_speed_rpm">
@@ -376,7 +379,7 @@
                     <input type="number" readonly id="motionDataToleranceMm">
                   </label>
                 </div>
-                <p class="motion-params__note">Se actualizan al elegir modelo en el monitor. Enviar al MCU con el puente Serial usando <code>esp32_line</code> de <code>/api/motion/data</code>.</p>
+                <p class="motion-params__note">El monitor conserva estos datos al elegir modelo y los publica al MCU Motion al iniciar el ciclo.</p>
               </fieldset>
             </div>
           </form>

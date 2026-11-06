@@ -4,6 +4,12 @@ Vías aparte del ciclo automático. Los pasos 1 a 8 del ciclo no cambian y no se
 
 Hasta terminar la revisión de arranque, **Start** queda bloqueado. En banco se puede saltar con `HMI_CHECKLIST_SKIP=1`.
 
+<!-- ANDON_SKIP_OPCIONAL — TODO_BORRAR: párrafo siguiente (puente sin cable Andon) -->
+
+Si no hay segundo cable USB para el Andon: en **Parámetros → Conexión** elige **No usar Andon** (se guarda en `data/serial.json`), o arranca el HMI con `HMI_ANDON_SKIP=1`. En ambos casos no exige COM del Andon para el ciclo (Motion y PLC siguen obligatorios).
+
+<!-- fin ANDON_SKIP_OPCIONAL -->
+
 ## Purga
 
 Saca el tubo de la zona de corte. No cuenta como ciclo de producción.

@@ -4,7 +4,8 @@
  * ServoFeeder.h — MCU (ESP32) ↔ drives feeder por CAN (CiA402 / SDO)
  *
  * Solo tramas en el bus: COB-ID + datos; respuestas SDO del drive.
- * Sin capa de aplicación ni tiempos de espera obligatorios (ajustar en banco).
+ * El arranque espera la confirmación de cada download y la lectura de 6041.
+ * En feed las escrituras no esperan esa confirmación.
  */
 
 #include <stdint.h>
@@ -129,8 +130,10 @@ static const uint32_t SERVO_CAN_HALT_DECEL_PP     = 8000000u;
 //   0x43 + 4 bytes de dato en [4..7] LE     (canReadSdoI32)
 //   expedited 2 bytes: índice en [1][2], dato uint16 LE en [4][5] (canReadStatusWord)
 //
-// Confirmación download (si el drive responde): CS 0x60, eco de índice/sub.
-// En feed muchas escrituras SDO no esperan confirmación; solo lecturas hacen poll RX.
+// Confirmación download: COB 0x580+node, CS 0x60, eco de índice y subíndice.
+// Abort: CS 0x80; código uint32 LE en bytes [4..7].
+// Arranque: cada download se confirma así y después se lee 6041.
+// En feed las escrituras SDO no esperan confirmación; las lecturas sí hacen poll RX.
 
 // ═══════════════════════════════════════════════════════════════════════════
 // [4] Objetos OD (CiA402) y control/status word
@@ -302,7 +305,8 @@ static const uint32_t SERVO_FEED_PP_DEFAULT           = 42545u;  // ≈650 mm/s
 //
 // Encender (por nodo, tras TWAI 500 kbit/s activo):
 //   Secuencia [6] pasos 1–4 (NMT → fault reset → Shutdown→Switch on→Enable→PP…).
-//   Verificar 6041: (status & 0x006F) == 0x0027.
+//   Verificar 6041: (status & 0x006F) == 0x0027 y bit 3 (fault) en cero.
+//   Si no se cumple, ese nodo no queda listo.
 //
 // Apagar (deshabilitar variador, un nodo o ambos):
 //   SDO 6040 ← 0x0006   2B 40 60 00 06 00 00 00   (Shutdown)

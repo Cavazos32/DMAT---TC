@@ -39,6 +39,7 @@
     themeToggle: document.getElementById("themeToggle"),
     motionTuneForm: document.getElementById("motionTuneForm"),
     motionTuneReload: document.getElementById("motionTuneReload"),
+    motionStatusRefresh: document.getElementById("motionStatusRefresh"),
     motionEsp32Hint: document.getElementById("motionEsp32Hint"),
     motionDataModelo: document.getElementById("motionDataModelo"),
     motionDataTargetMm: document.getElementById("motionDataTargetMm"),
@@ -76,6 +77,8 @@
   let motionPuuSign = -1;
   let motionFeedStepsPerMm = 3600 / 55;
   let motionEncPollTimer = null;
+  let motionEncPollBusy = false;
+  let motionCommandInFlight = false;
   let statePollTimer = null;
   let cycleStepsCatalog = [];
   let plcPollTimer = null;
@@ -756,6 +759,12 @@
   }
 
   async function sendMotionOp(op, extra) {
+    const urgent = op === "lmguide_stop";
+    if (motionCommandInFlight && !urgent) {
+      pushLocalEvent("Motion está ejecutando otra orden. Usa Paro o espera a que termine.", "error");
+      return null;
+    }
+    if (!urgent) motionCommandInFlight = true;
     const body = Object.assign({ op: op, tune: motionTuneFromForm() }, extra || {});
     try {
       const res = await fetch("/api/motion/cmd", {
@@ -766,6 +775,14 @@
       const data = await res.json();
       if (!data.ok) {
         pushLocalEvent(data.error || "No se armó la orden Motion.", "error");
+        return null;
+      }
+      if (!data.sent) {
+        pushLocalEvent(data.reason || "No se envió la orden Motion.", "error");
+        return null;
+      }
+      if (data.command_ok === false) {
+        pushLocalEvent(data.error || "El MCU Motion rechazó la orden: " + op, "error");
         return null;
       }
       motionApplyScale(data);
@@ -785,6 +802,8 @@
     } catch (err) {
       pushLocalEvent("Error al enviar la orden Motion.", "error");
       return null;
+    } finally {
+      if (!urgent) motionCommandInFlight = false;
     }
   }
 
@@ -802,12 +821,17 @@
       const on = btn.getAttribute("aria-pressed") !== "true";
       extra.on = on;
       const data = await sendMotionOp(op, extra);
-      if (data) latchLmServo(on);
+      if (data && data.command_ok === true) latchLmServo(on);
       return;
     }
     if (op === "lmguide_init") {
       const data = await sendMotionOp(op);
-      if (data) latchLmServo(true);
+      if (data && data.command_ok === true) latchLmServo(true);
+      return;
+    }
+    if (op === "motion_hw_init") {
+      const data = await sendMotionOp(op);
+      if (data && data.command_ok === true) latchLmServo(true);
       return;
     }
     if (op === "lmguide_move") {
@@ -820,6 +844,12 @@
       extra.mm = mm;
     }
     if (op === "encoder_reset") {
+      extra.side = btn.getAttribute("data-motion-side") || "R";
+      const data = await sendMotionOp(op, extra);
+      if (data) pollEncoder();
+      return;
+    }
+    if (op === "feeder_test") {
       extra.side = btn.getAttribute("data-motion-side") || "R";
       const data = await sendMotionOp(op, extra);
       if (data) pollEncoder();
@@ -845,7 +875,7 @@
       const sideData = encoder && encoder[side];
       if (el) {
         const mm = sideData && sideData.mm;
-        el.textContent = mm == null || !Number.isFinite(Number(mm)) ? "—" : Number(mm).toFixed(1) + " mm";
+        el.textContent = mm == null || !Number.isFinite(Number(mm)) ? "—" : Number(mm).toFixed(2) + " mm";
       }
       if (led) {
         const on = !!(sideData && sideData.laser === true);
@@ -859,12 +889,19 @@
   }
 
   async function pollEncoder() {
+    if (motionEncPollBusy || motionCommandInFlight) return;
+    motionEncPollBusy = true;
     try {
       const res = await fetch("/api/motion/status");
       const data = await res.json();
-      if (data.ok) motionShowEncoder(data.encoder);
+      if (data.ok && data.sent) {
+        motionShowEncoder(data.encoder);
+        if (typeof data.lm_servo_on === "boolean") latchLmServo(data.lm_servo_on);
+      }
     } catch (err) {
       motionShowEncoder(null);
+    } finally {
+      motionEncPollBusy = false;
     }
   }
 
@@ -875,7 +912,7 @@
     }
     if (!on) return;
     pollEncoder();
-    motionEncPollTimer = window.setInterval(pollEncoder, 800);
+    motionEncPollTimer = window.setInterval(pollEncoder, 400);
   }
 
   function activateSettingsTab(tabId) {
@@ -984,10 +1021,26 @@
 
   let serialSyncing = false;
 
-  function fillPortSelect(select, ports, selected) {
+  /* ==========================================================================
+   * ANDON_SKIP_OPCIONAL — TODO_BORRAR
+   * Puente de banco: opción «No usar Andon», mensajes y fillPortSelect(extraNone).
+   * Buscar este tag en app.py y rutinas-operador.md para eliminar todo junto.
+   * ========================================================================== */
+  /** True cuando Andon no se usa (Conexión «No usar» o HMI_ANDON_SKIP=1). */
+  let serialAndonSkipped = false;
+  /** Valor enviado al guardar cuando se elige «No usar Andon» (coincide con app.py). */
+  let andonNoneToken = "__none__";
+
+  function fillPortSelect(select, ports, selected, extraNone) {
     const current = selected || "";
     const seen = {};
     select.innerHTML = "";
+    if (extraNone && extraNone.value) {
+      const optNone = document.createElement("option");
+      optNone.value = extraNone.value;
+      optNone.textContent = extraNone.label || "—";
+      select.appendChild(optNone);
+    }
     const none = document.createElement("option");
     none.value = "";
     none.textContent = "Sin puerto";
@@ -1021,18 +1074,43 @@
     return name + ": " + port + " guardado. Pulsa Probar COM.";
   }
 
+  function andonConnectionStatusText(data) {
+    if (!data) return "";
+    if (data.andon_disabled) {
+      return "Andon: no usado (puedes conectarlo más tarde en este menú).";
+    }
+    if (data.andon_skipped && !data.andon_disabled) {
+      return "Andon: omitido en esta sesión (variable HMI_ANDON_SKIP=1).";
+    }
+    return "";
+  }
+
   async function loadSerialPorts() {
     if (!els.selectMotionPort || !els.selectPlcPort || !els.selectAndonPort) return;
     serialSyncing = true;
     try {
       const res = await fetch("/api/serial");
       const data = await res.json();
+      if (data.andon_none_value) {
+        andonNoneToken = data.andon_none_value;
+      }
       fillPortSelect(els.selectMotionPort, data.ports, data.motion);
       fillPortSelect(els.selectPlcPort, data.ports, data.plc);
-      fillPortSelect(els.selectAndonPort, data.ports, data.andon);
+      const andonSel =
+        data.andon_disabled && data.andon_none_value ? data.andon_none_value : data.andon;
+      fillPortSelect(els.selectAndonPort, data.ports, andonSel, {
+        value: andonNoneToken,
+        label: "No usar Andon",
+      });
+      serialAndonSkipped = !!data.andon_skipped;
       if (!data.motion) setLinkStatus(els.serialMotionStatus, serialLinkText("Motion", ""), false);
       if (!data.plc) setLinkStatus(els.serialPlcStatus, serialLinkText("PLC", ""), false);
-      if (!data.andon) setLinkStatus(els.serialAndonStatus, serialLinkText("Andon", ""), false);
+      const andonHint = andonConnectionStatusText(data);
+      if (andonHint && els.serialAndonStatus) {
+        setLinkStatus(els.serialAndonStatus, andonHint, null);
+      } else if (!data.andon && !data.andon_disabled) {
+        setLinkStatus(els.serialAndonStatus, serialLinkText("Andon", ""), false);
+      }
     } catch (err) {
       if (els.serialMotionStatus) els.serialMotionStatus.textContent = "No se pudo leer la lista de puertos.";
     } finally {
@@ -1076,11 +1154,18 @@
         );
       }
       if (els.serialAndonStatus) {
-        setLinkStatus(
-          els.serialAndonStatus,
-          serialLinkText("Andon", data.andon),
-          data.andon ? null : false
-        );
+        const hint = andonConnectionStatusText(data);
+        if (hint) {
+          setLinkStatus(els.serialAndonStatus, hint, null);
+          serialAndonSkipped = !!data.andon_skipped;
+        } else {
+          serialAndonSkipped = !!data.andon_skipped;
+          setLinkStatus(
+            els.serialAndonStatus,
+            serialLinkText("Andon", data.andon),
+            data.andon ? null : false
+          );
+        }
       }
     } catch (err) {
       if (els.serialMotionStatus) els.serialMotionStatus.textContent = "Sin conexión con el servidor.";
@@ -1102,6 +1187,10 @@
   if (els.selectPlcPort) els.selectPlcPort.addEventListener("change", saveSerialPorts);
   if (els.selectAndonPort) els.selectAndonPort.addEventListener("change", saveSerialPorts);
   async function testModuleCom(moduleName, statusEl) {
+    if (moduleName === "andon" && serialAndonSkipped) {
+      setLinkStatus(statusEl, "Andon no usado. No hay COM que probar.", null);
+      return;
+    }
     setLinkStatus(statusEl, "Probando " + moduleName + "…", null);
     try {
       const res = await fetch("/api/serial/test", {
@@ -1136,6 +1225,7 @@
       testModuleCom("andon", els.serialAndonStatus);
     });
   }
+  /* --- fin ANDON_SKIP_OPCIONAL (serial / conexión Andon en JS) — TODO_BORRAR --- */
 
   els.btnAppSettings.addEventListener("click", openSettings);
   els.settingsModalClose.addEventListener("click", closeSettings);
@@ -1241,6 +1331,9 @@
   if (els.motionTuneReload) {
     els.motionTuneReload.addEventListener("click", loadMotionTune);
   }
+  if (els.motionStatusRefresh) {
+    els.motionStatusRefresh.addEventListener("click", pollEncoder);
+  }
   if (els.cycleParamsForm) {
     els.cycleParamsForm.addEventListener("submit", saveCycleParams);
   }
@@ -1316,6 +1409,14 @@
         pushLocalEvent(data.error || "No se armó la orden PLC.", "error");
         return null;
       }
+      if (!data.sent) {
+        pushLocalEvent(data.reason || "No se envió la orden PLC.", "error");
+        return null;
+      }
+      if (data.command_ok !== true) {
+        pushLocalEvent("El MCU PLC no confirmó la orden: " + op, "error");
+        return null;
+      }
       const lines = (data.lines || []).join("\n");
       const reply = (data.replies || []).filter(Boolean).join(" | ");
       let hint = lines;
@@ -1347,15 +1448,13 @@
     if (op === "valve") {
       const name = btn.getAttribute("data-plc-name");
       const on = btn.getAttribute("aria-pressed") !== "true";
-      const data = await sendPlcOp("valve", { name: name, on: on });
-      if (data) setPlcPressed(btn, on);
+      await sendPlcOp("valve", { name: name, on: on });
       return;
     }
     if (op === "blower") {
       const on = btn.getAttribute("aria-pressed") !== "true";
       if (!on) {
-        const data = await sendPlcOp("blower_off");
-        if (data) setPlcPressed(btn, false);
+        await sendPlcOp("blower_off");
         return;
       }
       const raw = els.plcBlowerMs ? String(els.plcBlowerMs.value).trim() : "2000";
@@ -1364,13 +1463,11 @@
         pushLocalEvent("El tiempo del blower tiene que ser un número.", "error");
         return;
       }
-      const data = await sendPlcOp("blower_on", { ms: ms });
-      if (data) setPlcPressed(btn, true);
+      await sendPlcOp("blower_on", { ms: ms });
       return;
     }
     if (op === "all_off" || op === "reset") {
-      const data = await sendPlcOp(op);
-      if (data) clearPlcOutputs();
+      await sendPlcOp(op);
     }
   }
 

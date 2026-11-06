@@ -46,6 +46,9 @@ CATALOG: dict[str, tuple[str, str]] = {
     "E041": ("Motion", "No hay puerto COM seleccionado. Elígelo en Parámetros, pestaña Conexión."),
     "E042": ("Motion", "El COM seleccionado no es el MCU Motion."),
     "E043": ("Motion", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
+    "E044": ("Motion", "LM Guide: el movimiento no se validó en destino (revisar drive o bus)."),
+    "E045": ("Motion", "Alimentación interrumpida (Stop u orden feeder_stop)."),
+    "E046": ("Orquestador", "No se puede limpiar el error: falla del PLC o seguridad en Motion siguen activas."),
     "E070": ("Andon", "No hay puerto COM seleccionado. Elígelo en Parámetros, pestaña Conexión."),
     "E071": ("Andon", "El COM seleccionado no es el MCU Andon."),
     "E072": ("Andon", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
@@ -62,6 +65,7 @@ FEED_STAGE_TO_CODE: dict[str, str] = {
     "encoder_tolerance_l": "E036",
     "comp_move": "E037",
     "safety": "E039",
+    "stopped": "E045",
     "unknown": "E038",
 }
 

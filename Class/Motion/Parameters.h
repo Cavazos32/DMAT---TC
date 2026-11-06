@@ -44,6 +44,7 @@ static const uint32_t PARAM_ENC_SETTLE_MS         = 250;
 static const uint32_t PARAM_ENC_POLL_MS           = 80;
 static const int16_t  PARAM_ENC_PCNT_HIGH_LIM     = 30000;
 static const int16_t  PARAM_ENC_PCNT_LOW_LIM      = -30000;
+static const uint16_t PARAM_ENC_FILTER_APB_TICKS  = 1023;
 
 static const int  PARAM_PIN_ENC_A_R = 18;
 static const int  PARAM_PIN_ENC_B_R = 19;
@@ -72,6 +73,16 @@ static const int      PARAM_CAN_RX_GPIO           = 5;
 static const uint32_t PARAM_CAN_BITRATE_KBPS      = 500;
 static const uint8_t  PARAM_CAN_NODE_R            = 1;
 static const uint8_t  PARAM_CAN_NODE_L            = 2;
+static const uint8_t  PARAM_CAN_RX_QUEUE_LEN      = 32;
+static const uint8_t  PARAM_CAN_TX_QUEUE_LEN      = 16;
+static const uint8_t  PARAM_CAN_INIT_MAX_RETRIES  = 3;
+static const uint32_t PARAM_CAN_INIT_RETRY_MS     = 400;
+static const uint32_t PARAM_CAN_SERVO_POWERUP_MS  = 1000;
+static const uint32_t PARAM_CAN_FAULT_RESET_MS    = 300;
+static const uint32_t PARAM_CAN_NMT_PREOP_MS      = 500;
+static const uint32_t PARAM_CAN_NMT_OPERATIONAL_MS = 500;
+static const uint32_t PARAM_CAN_CIA402_STEP_MS    = 200;
+static const uint32_t PARAM_CAN_CIA402_SHORT_MS   = 50;
 
 static const uint32_t PARAM_FEED_ENC_INC_PER_REV  = 131072u;
 static const int8_t   PARAM_FEED_CMD_SIGN_R       = 1;
@@ -97,8 +108,17 @@ static const int      PARAM_PIN_MODBUS_RX         = 16;
 static const int      PARAM_PIN_MODBUS_TX         = 17;
 
 static const float    PARAM_LM_PR_SPEED_RPM       = 1200.0f;
+static const float    PARAM_LM_PR_SPEED_RPM_MIN   = 400.0f;
+static const float    PARAM_LM_PR_SPEED_RPM_MAX   = 3000.0f;
 static const int32_t  PARAM_LM_JOG_DELTA_PUU      = 2000;
 static const uint32_t PARAM_LM_SERVO_ON_SETTLE_MS = 2000;
+
+// Validación LM Guide (ASDA PUU vs objetivo; fábrica ServoLMGuide.h [7])
+static const float    PARAM_LM_MOVE_TOLERANCE_MM  = 0.5f;
+static const float    PARAM_LM_HOME_TOLERANCE_MM  = 1.0f;
+static const float    PARAM_LM_HOME_MAX_TRAVEL_MM = 120.0f;
+static const uint32_t PARAM_LM_MOVE_DONE_TIMEOUT_MS = 45000;
+static const uint8_t  PARAM_LM_MOVE_MAX_ATTEMPTS  = 3;
 
 static const uint16_t PARAM_LM_HOME_TORQUE_PCT    = 10;
 static const uint16_t PARAM_LM_HOME_TIME_MS       = 150;
@@ -166,6 +186,7 @@ static inline void motionDataSetDefaults(MotionData* data) {
 #define ENC_OM_SETTLE_MS        PARAM_ENC_SETTLE_MS
 #define ENC_OM_PCNT_HIGH_LIM    PARAM_ENC_PCNT_HIGH_LIM
 #define ENC_OM_PCNT_LOW_LIM     PARAM_ENC_PCNT_LOW_LIM
+#define ENC_OM_FILTER_APB_TICKS PARAM_ENC_FILTER_APB_TICKS
 #define ENC_OM_PIN_A_R          PARAM_PIN_ENC_A_R
 #define ENC_OM_PIN_B_R          PARAM_PIN_ENC_B_R
 #define ENC_OM_PIN_Z_R          PARAM_PIN_ENC_Z_R
@@ -183,6 +204,16 @@ static inline void motionDataSetDefaults(MotionData* data) {
 #define SERVO_CAN_BITRATE_KBPS      PARAM_CAN_BITRATE_KBPS
 #define SERVO_CAN_NODE_R            PARAM_CAN_NODE_R
 #define SERVO_CAN_NODE_L            PARAM_CAN_NODE_L
+#define SERVO_CAN_RX_QUEUE_LEN      PARAM_CAN_RX_QUEUE_LEN
+#define SERVO_CAN_TX_QUEUE_LEN      PARAM_CAN_TX_QUEUE_LEN
+#define SERVO_CAN_INIT_MAX_RETRIES  PARAM_CAN_INIT_MAX_RETRIES
+#define SERVO_CAN_INIT_RETRY_MS     PARAM_CAN_INIT_RETRY_MS
+#define SERVO_CAN_POWERUP_MS        PARAM_CAN_SERVO_POWERUP_MS
+#define SERVO_CAN_FAULT_RESET_MS    PARAM_CAN_FAULT_RESET_MS
+#define SERVO_CAN_NMT_PREOP_MS      PARAM_CAN_NMT_PREOP_MS
+#define SERVO_CAN_NMT_OPERATIONAL_MS PARAM_CAN_NMT_OPERATIONAL_MS
+#define SERVO_CAN_CIA402_STEP_MS    PARAM_CAN_CIA402_STEP_MS
+#define SERVO_CAN_CIA402_SHORT_MS   PARAM_CAN_CIA402_SHORT_MS
 #define SERVO_CAN_ENC_INC_PER_REV   PARAM_FEED_ENC_INC_PER_REV
 #define SERVO_CAN_CMD_SIGN_R        PARAM_FEED_CMD_SIGN_R
 #define SERVO_CAN_CMD_SIGN_L        PARAM_FEED_CMD_SIGN_L

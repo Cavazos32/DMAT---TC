@@ -459,6 +459,8 @@ class MotionLink:
 def timeout_for(op):
     if op == "lmguide_home":
         return 40.0
+    if op == "motion_hw_init":
+        return 120.0
     if op in {"feeder_init", "lmguide_servo_on"}:
         return 8.0
     return 2.0

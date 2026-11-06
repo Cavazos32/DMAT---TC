@@ -40,6 +40,7 @@ struct MotionRuntime {
   EncoderSideRuntime encoder[MOTION_SIDE_COUNT];
   bool feederReady[MOTION_SIDE_COUNT];
   bool lmguideServoOn;
+  bool lmguideHomed;
 };
 
 static MotionTune gTune;
@@ -47,8 +48,12 @@ static MotionData gData;
 static MotionRuntime gRt;
 static Preferences gPrefs;
 
+static bool gCanBusReady = false;
+
 static uint32_t gLastEncoderPollMs = 0;
 static bool gFeedStageBusy = false;
+static volatile bool gLmAbortRequested = false;
+static volatile bool gFeedAbortRequested = false;
 
 enum FeedStageError {
   FEED_STAGE_OK = 0,
@@ -61,6 +66,7 @@ enum FeedStageError {
   FEED_STAGE_ERR_ENC_L,
   FEED_STAGE_ERR_COMP,
   FEED_STAGE_ERR_SAFETY,
+  FEED_STAGE_ERR_STOP,
 };
 
 struct FeedStageSideResult {
@@ -147,6 +153,31 @@ static uint8_t feederNode(MotionSide side) {
   return (side == MOTION_SIDE_R) ? SERVO_CAN_NODE_R : SERVO_CAN_NODE_L;
 }
 
+/** Línea JSON por Serial: la consola de Flask la muestra como [Motion RX] … */
+static void feederTrace(const char* phase, MotionSide side, const char* err, uint32_t rx_sdo_frames,
+                        int last_cmd_byte) {
+  char s = (side == MOTION_SIDE_R) ? 'R' : 'L';
+  uint8_t node = feederNode(side);
+  twai_status_info_t st = {};
+  (void)twai_get_status_info(&st);
+  if (last_cmd_byte >= 0) {
+    Serial.printf(
+        "{\"op\":\"feeder_trace\",\"phase\":\"%s\",\"side\":\"%c\",\"node\":%u,\"err\":\"%s\","
+        "\"rx_sdo\":%lu,\"last_cmd\":%d,"
+        "\"twai\":{\"tx_err\":%lu,\"rx_missed\":%lu,\"arb_lost\":%lu,\"bus_err\":%lu}}\n",
+        phase, s, (unsigned)node, err, (unsigned long)rx_sdo_frames, last_cmd_byte,
+        (unsigned long)st.tx_error_counter, (unsigned long)st.rx_missed_count,
+        (unsigned long)st.arb_lost_count, (unsigned long)st.bus_error_count);
+  } else {
+    Serial.printf(
+        "{\"op\":\"feeder_trace\",\"phase\":\"%s\",\"side\":\"%c\",\"node\":%u,\"err\":\"%s\","
+        "\"rx_sdo\":%lu,"
+        "\"twai\":{\"tx_err\":%lu,\"rx_missed\":%lu,\"arb_lost\":%lu,\"bus_err\":%lu}}\n",
+        phase, s, (unsigned)node, err, (unsigned long)rx_sdo_frames, (unsigned long)st.tx_error_counter,
+        (unsigned long)st.rx_missed_count, (unsigned long)st.arb_lost_count, (unsigned long)st.bus_error_count);
+  }
+}
+
 static int8_t feederCmdSign(MotionSide side) {
   return (side == MOTION_SIDE_R) ? SERVO_CAN_CMD_SIGN_R : SERVO_CAN_CMD_SIGN_L;
 }
@@ -194,12 +225,14 @@ static void pcntSetupSide(MotionSide side) {
   cfg.lctrl_mode = PCNT_MODE_KEEP;
   cfg.hctrl_mode = PCNT_MODE_REVERSE;
   cfg.pos_mode = PCNT_COUNT_INC;
-  cfg.neg_mode = PCNT_COUNT_DEC;
+  cfg.neg_mode = PCNT_COUNT_DIS;
   cfg.counter_h_lim = ENC_OM_PCNT_HIGH_LIM;
   cfg.counter_l_lim = ENC_OM_PCNT_LOW_LIM;
   cfg.unit = hw.unit;
   cfg.channel = PCNT_CHANNEL_0;
   pcnt_unit_config(&cfg);
+  pcnt_set_filter_value(hw.unit, ENC_OM_FILTER_APB_TICKS);
+  pcnt_filter_enable(hw.unit);
   pcnt_counter_pause(hw.unit);
   pcnt_counter_clear(hw.unit);
   pcnt_counter_resume(hw.unit);
@@ -320,13 +353,85 @@ static bool encoderWithinTolerance(MotionSide side) {
 
 // ── CAN feeder ──────────────────────────────────────────────────────────────
 
+// Init largo: ver pollSerial / motionYieldMs más abajo.
+static void pollSerial();
+static void motionYieldMs(uint32_t ms);
+
 static bool canBusInit() {
-  twai_general_config_t g_config =
-      TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)SERVO_CAN_TX_GPIO, (gpio_num_t)SERVO_CAN_RX_GPIO, TWAI_MODE_NORMAL);
-  twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
-  twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-  if (twai_driver_install(&g_config, &t_config, &f_config) != ESP_OK) return false;
-  return twai_start() == ESP_OK;
+  if (gCanBusReady) return true;
+  for (uint8_t attempt = 0; attempt < SERVO_CAN_INIT_MAX_RETRIES; attempt++) {
+    twai_general_config_t g_config =
+        TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)SERVO_CAN_TX_GPIO, (gpio_num_t)SERVO_CAN_RX_GPIO, TWAI_MODE_NORMAL);
+    g_config.rx_queue_len = SERVO_CAN_RX_QUEUE_LEN;
+    g_config.tx_queue_len = SERVO_CAN_TX_QUEUE_LEN;
+    twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
+    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    if (twai_driver_install(&g_config, &t_config, &f_config) == ESP_OK) {
+      if (twai_start() == ESP_OK) return true;
+      (void)twai_driver_uninstall();
+    }
+    motionYieldMs(SERVO_CAN_INIT_RETRY_MS);
+  }
+  return false;
+}
+
+/** Primer uso: instala e inicia TWAI. Idempotente. */
+static bool ensureCanBus() {
+  if (gCanBusReady) return true;
+  if (!canBusInit()) return false;
+  gCanBusReady = true;
+  return true;
+}
+
+static bool canRestartBus() {
+  (void)twai_stop();
+  (void)twai_driver_uninstall();
+  gCanBusReady = false;
+  return ensureCanBus();
+}
+
+/** Bus listo para enviar/recibir sin vaciar colas (lectura SDO: no borrar TX recién encolado). */
+static bool canEnsureRunning() {
+  if (!ensureCanBus()) return false;
+
+  twai_status_info_t status = {};
+  if (twai_get_status_info(&status) != ESP_OK) return canRestartBus();
+
+  if (status.state == TWAI_STATE_BUS_OFF) {
+    if (twai_initiate_recovery() != ESP_OK) return canRestartBus();
+    if (twai_get_status_info(&status) != ESP_OK) return canRestartBus();
+  }
+
+  uint32_t t0 = millis();
+  while (status.state == TWAI_STATE_RECOVERING && millis() - t0 < 1000u) {
+    delay(10);
+    if (twai_get_status_info(&status) != ESP_OK) return canRestartBus();
+  }
+
+  if (status.state == TWAI_STATE_STOPPED) {
+    if (twai_start() != ESP_OK) return canRestartBus();
+  } else if (status.state != TWAI_STATE_RUNNING) {
+    return canRestartBus();
+  }
+
+  return true;
+}
+
+// Deja TWAI operativo y limpia colas: solo al arranque / reinicio de init CAN completo.
+static bool canPrepareForInit() {
+  if (!canEnsureRunning()) return false;
+  (void)twai_clear_transmit_queue();
+  (void)twai_clear_receive_queue();
+  return true;
+}
+
+// Igual que serviceCANRx() en Ejemplo/Motion/Servo_Feed.cpp: vaciar la cola RX
+// para no llenarla con confirms/expedited SDO que el drive envía aunque no los leamos.
+static void canServiceRxDrain() {
+  twai_message_t rx;
+  for (uint8_t n = 0; n < SERVO_CAN_RX_QUEUE_LEN; n++) {
+    if (twai_receive(&rx, 0) != ESP_OK) return;
+  }
 }
 
 static bool canSendRaw(uint32_t cobId, const uint8_t* data, uint8_t len) {
@@ -334,7 +439,13 @@ static bool canSendRaw(uint32_t cobId, const uint8_t* data, uint8_t len) {
   msg.identifier = cobId;
   msg.data_length_code = len;
   msg.extd = 0;
+  msg.rtr = 0;
   memcpy(msg.data, data, len);
+  esp_err_t err = twai_transmit(&msg, pdMS_TO_TICKS(80));
+  if (err == ESP_OK) return true;
+
+  // Una cola llena o bus-off no debe dejar Motion bloqueado para siempre.
+  if (!canEnsureRunning()) return false;
   return twai_transmit(&msg, pdMS_TO_TICKS(80)) == ESP_OK;
 }
 
@@ -376,11 +487,14 @@ static bool canReadSdoI32(uint8_t node, uint16_t index, uint8_t sub, int32_t* ou
   uint8_t req[8] = {0x40, (uint8_t)(index & 0xFF), (uint8_t)(index >> 8), sub, 0, 0, 0, 0};
   if (!canSendRaw(SERVO_CAN_COB_TX(node), req, 8)) return false;
 
+  // Mismo criterio que Ejemplo/Motion/Servo_Feed.cpp: receive corto en bucle (CAN_SDO_RX_TIMEOUT_MS = 2 allí; 5 aquí).
+  const TickType_t rxTicks = pdMS_TO_TICKS(5);
   uint32_t t0 = millis();
   while (millis() - t0 < timeoutMs) {
+    pollSerial();
     twai_message_t rx;
-    if (twai_receive(&rx, pdMS_TO_TICKS(20)) != ESP_OK) continue;
-    if (rx.identifier != SERVO_CAN_COB_RX(node) || rx.data_length_code < 8) continue;
+    if (twai_receive(&rx, rxTicks) != ESP_OK) continue;
+    if ((rx.identifier & 0x7FFu) != SERVO_CAN_COB_RX(node) || rx.data_length_code < 8) continue;
     if (rx.data[0] != 0x43) continue;
     if (rx.data[1] != (index & 0xFF) || rx.data[2] != (index >> 8) || rx.data[3] != sub) continue;
     *out = (int32_t)((uint32_t)rx.data[4] | ((uint32_t)rx.data[5] << 8) | ((uint32_t)rx.data[6] << 16) |
@@ -390,47 +504,155 @@ static bool canReadSdoI32(uint8_t node, uint16_t index, uint8_t sub, int32_t* ou
   return false;
 }
 
-static void feederWriteProfile(MotionSide side) {
+// Verificación 6041: copiado del flujo Ejemplo/Motion/Servo_Feed.cpp canReadStatusWord (upload + receive corto en bucle).
+static const uint32_t FEEDER_SDO_CONFIRM_MS = 600;
+
+static bool canReadStatusWord(MotionSide side, uint16_t* out, uint32_t timeoutMs) {
   uint8_t node = feederNode(side);
-  canSdoDownloadU32(node, SERVO_OD_PROFILE_VELOCITY, 0, gTune.feeder[side].profileVelocityPps);
-  canSdoDownloadU32(node, SERVO_OD_PROFILE_ACCEL, 0, SERVO_CAN_PROFILE_ACCEL_PPS2);
-  canSdoDownloadU32(node, SERVO_OD_PROFILE_DECEL, 0, SERVO_CAN_PROFILE_DECEL_PPS2);
+  uint8_t req[8] = {0x40,
+                    (uint8_t)(SERVO_OD_STATUS_WORD & 0xFF),
+                    (uint8_t)(SERVO_OD_STATUS_WORD >> 8),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0};
+  if (!canSendRaw(SERVO_CAN_COB_TX(node), req, 8)) return false;
+
+  const uint32_t expectedRx = SERVO_CAN_COB_RX(node);
+  const TickType_t rxTicks = pdMS_TO_TICKS(5);  // FeederCan.h CAN_STATUS_RX_TIMEOUT_MS
+  uint32_t t0 = millis();
+  uint32_t rx_sdo_frames = 0;
+  int last_cmd = -1;
+  while (millis() - t0 < timeoutMs) {
+    pollSerial();
+    twai_message_t rx;
+    if (twai_receive(&rx, rxTicks) != ESP_OK) continue;
+    uint32_t rxId = rx.identifier & 0x7FFu;
+    if (rxId != expectedRx || rx.data_length_code < 4) continue;
+
+    if (rx.data[1] != (uint8_t)(SERVO_OD_STATUS_WORD & 0xFF) ||
+        rx.data[2] != (uint8_t)(SERVO_OD_STATUS_WORD >> 8) || rx.data[3] != 0) {
+      continue;
+    }
+
+    rx_sdo_frames++;
+    uint8_t cmd = rx.data[0];
+    last_cmd = (int)cmd;
+
+    if (cmd == 0x80) {
+      feederTrace("status_word_abort", side, "sdo_abort", rx_sdo_frames, last_cmd);
+      return false;
+    }
+
+    // Upload expedited: algunos drives mandan 0x43 (4 bytes) y otros 0x4B (2 bytes) para UINT16.
+    if (cmd == 0x43 && rx.data_length_code >= 8) {
+      *out = (uint16_t)((uint16_t)rx.data[4] | ((uint16_t)rx.data[5] << 8));
+      return true;
+    }
+    if (cmd == 0x4B && rx.data_length_code >= 6) {
+      *out = (uint16_t)((uint16_t)rx.data[4] | ((uint16_t)rx.data[5] << 8));
+      return true;
+    }
+  }
+  feederTrace("status_word_timeout", side, "no_valid_upload", rx_sdo_frames, last_cmd);
+  return false;
+}
+
+static bool feederWriteProfile(MotionSide side) {
+  uint8_t node = feederNode(side);
+  return canSdoDownloadU32(node, SERVO_OD_PROFILE_VELOCITY, 0, gTune.feeder[side].profileVelocityPps) &&
+         canSdoDownloadU32(node, SERVO_OD_PROFILE_ACCEL, 0, SERVO_CAN_PROFILE_ACCEL_PPS2) &&
+         canSdoDownloadU32(node, SERVO_OD_PROFILE_DECEL, 0, SERVO_CAN_PROFILE_DECEL_PPS2);
 }
 
 static bool feederInitNode(MotionSide side) {
+  if (!ensureCanBus()) return false;
+  gRt.feederReady[side] = false;
+
   uint8_t node = feederNode(side);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x0080);
-  delay(200);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x0006);
-  delay(200);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x0007);
-  delay(200);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x000F);
-  delay(200);
-  canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PP);
-  delay(100);
-  canSdoDownloadU32(node, SERVO_OD_MAX_PROFILE_VEL, 0, SERVO_CAN_MAX_PPS);
-  canSdoDownloadU16(node, SERVO_OD_HALT_OPTION, 0, SERVO_CAN_HALT_OPTION_CODE);
-  canSdoDownloadU32(node, SERVO_OD_QUICK_STOP_DECEL, 0, SERVO_CAN_HALT_DECEL_PP);
-  feederWriteProfile(side);
-  canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)gTune.feeder[side].targetPositionCounts);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x002F);
-  delay(100);
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x0006)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x0007)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x000F)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+  if (!canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PP)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+  if (!canSdoDownloadU32(node, SERVO_OD_MAX_PROFILE_VEL, 0, SERVO_CAN_MAX_PPS)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_SHORT_MS);
+  if (!canSdoDownloadU16(node, SERVO_OD_HALT_OPTION, 0, SERVO_CAN_HALT_OPTION_CODE)) return false;
+  if (!canSdoDownloadU32(node, SERVO_OD_QUICK_STOP_DECEL, 0, SERVO_CAN_HALT_DECEL_PP)) return false;
+  motionYieldMs(100);
+  if (!feederWriteProfile(side)) return false;
+  motionYieldMs(500);
+  if (!canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)gTune.feeder[side].targetPositionCounts))
+    return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x002F)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_STEP_MS);
+
+  uint16_t sw = 0;
+  if (!canReadStatusWord(side, &sw, FEEDER_SDO_CONFIRM_MS)) return false;
+  // 6041: fault = bit 3; Operation Enabled = (sw & 0x006F) == 0x0027.
+  if ((sw & 0x0008u) != 0) {
+    return false;
+  }
+  if ((sw & 0x006Fu) != 0x0027u) {
+    return false;
+  }
+
   gRt.feederReady[side] = true;
   return true;
 }
 
-static void feederInitBus() {
-  canNmt(0x80);
-  delay(50);
-  canNmt(0x01);
-  delay(50);
-  feederInitNode(MOTION_SIDE_R);
-  feederInitNode(MOTION_SIDE_L);
+/** Init CAN + ambos feeders. Respuesta serial como antes (última línea ok_r/ok_l). */
+static bool feederInitBus(bool forceReinit = false) {
+  if (!forceReinit && gRt.feederReady[MOTION_SIDE_R] && gRt.feederReady[MOTION_SIDE_L]) {
+    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":true,\"ok_r\":true,\"ok_l\":true}"));
+    return true;
+  }
+  bool canOk = forceReinit ? canRestartBus() : canPrepareForInit();
+  if (!canOk) {
+    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":false,\"error\":\"can_bus\"}"));
+    return false;
+  }
+  gRt.feederReady[MOTION_SIDE_R] = false;
+  gRt.feederReady[MOTION_SIDE_L] = false;
+
+  bool resetR = canSdoDownloadU16(feederNode(MOTION_SIDE_R), SERVO_OD_CONTROL_WORD, 0, 0x0080);
+  bool resetL = canSdoDownloadU16(feederNode(MOTION_SIDE_L), SERVO_OD_CONTROL_WORD, 0, 0x0080);
+  motionYieldMs(SERVO_CAN_FAULT_RESET_MS);
+  bool nmtPre = canNmt(0x80);
+  motionYieldMs(SERVO_CAN_NMT_PREOP_MS);
+  bool nmtOp = canNmt(0x01);
+  motionYieldMs(SERVO_CAN_NMT_OPERATIONAL_MS);
+
+  bool okR = false;
+  bool okL = false;
+  if (!resetR || !resetL) {
+    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":false,\"error\":\"fault_reset_tx\"}"));
+    return false;
+  }
+  if (!nmtPre || !nmtOp) {
+    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":false,\"error\":\"nmt_tx\"}"));
+    return false;
+  }
+  okR = feederInitNode(MOTION_SIDE_R);
+  okL = feederInitNode(MOTION_SIDE_L);
+
+  Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
+  Serial.print(okR && okL ? "true" : "false");
+  Serial.print(F(",\"ok_r\":"));
+  Serial.print(okR ? "true" : "false");
+  Serial.print(F(",\"ok_l\":"));
+  Serial.print(okL ? "true" : "false");
+  Serial.println(F("}"));
+  return okR && okL;
 }
 
-static void feederStop(MotionSide side) {
-  canSdoDownloadU16(feederNode(side), SERVO_OD_CONTROL_WORD, 0, 0x010F);
+static bool feederStop(MotionSide side) {
+  return canSdoDownloadU16(feederNode(side), SERVO_OD_CONTROL_WORD, 0, 0x010F);
 }
 
 static bool feederApplySideComp(MotionSide side) {
@@ -441,50 +663,54 @@ static bool feederApplySideComp(MotionSide side) {
 
   counts *= (int32_t)feederCmdSign(side);
   uint8_t node = feederNode(side);
-  canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PP);
+  if (!canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PP)) return false;
   int32_t pos = 0;
   if (!canReadSdoI32(node, SERVO_OD_POSITION_ACTUAL, 0, &pos, 400)) return false;
 
   int32_t target = pos + counts;
-  feederWriteProfile(side);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F);
-  canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)target);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x012F);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x013F);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
-  return true;
+  return feederWriteProfile(side) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F) &&
+         canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)target) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x012F) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x013F) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
 }
 
-static void feederJogStep(MotionSide side, int dirSign) {
-  if (!gRt.feederReady[side]) return;
+static bool feederJogStep(MotionSide side, int dirSign) {
+  if (!gRt.feederReady[side]) return false;
   uint8_t node = feederNode(side);
   int32_t pos = 0;
-  if (!canReadSdoI32(node, SERVO_OD_POSITION_ACTUAL, 0, &pos, 400)) return;
+  if (!canReadSdoI32(node, SERVO_OD_POSITION_ACTUAL, 0, &pos, 400)) return false;
 
   int32_t delta = SERVO_CAN_JOG_STEP_COUNTS * (int32_t)dirSign * (int32_t)feederCmdSign(side);
   int32_t target = pos + delta;
 
-  feederWriteProfile(side);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F);
-  canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)target);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x012F);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x013F);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
+  return feederWriteProfile(side) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F) &&
+         canSdoDownloadU32(node, SERVO_OD_TARGET_POSITION, 0, (uint32_t)target) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x012F) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x013F) &&
+         canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
 }
 
-static void feederRunPv(MotionSide side, int32_t velocitySigned) {
+static bool feederRunPv(MotionSide side, int32_t velocitySigned) {
   uint8_t node = feederNode(side);
-  canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PV);
-  feederWriteProfile(side);
-  canSdoDownloadU32(node, SERVO_OD_TARGET_VELOCITY, 0, (uint32_t)velocitySigned);
-  canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x000F);
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F)) return false;
+  if (!canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PV)) return false;
+  if (!feederWriteProfile(side)) return false;
+  if (!canSdoDownloadU32(node, SERVO_OD_TARGET_VELOCITY, 0, 0)) return false;
+  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F)) return false;
+  motionYieldMs(SERVO_CAN_CIA402_SHORT_MS);
+  if (!canSdoDownloadU32(node, SERVO_OD_TARGET_VELOCITY, 0, (uint32_t)velocitySigned)) return false;
+  return canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x000F);
 }
 
-static void feederStopAll() {
-  feederStop(MOTION_SIDE_R);
-  feederStop(MOTION_SIDE_L);
-  canSdoDownloadU32(feederNode(MOTION_SIDE_R), SERVO_OD_TARGET_VELOCITY, 0, 0);
-  canSdoDownloadU32(feederNode(MOTION_SIDE_L), SERVO_OD_TARGET_VELOCITY, 0, 0);
+static bool feederStopAll() {
+  bool ok = feederStop(MOTION_SIDE_R);
+  ok = feederStop(MOTION_SIDE_L) && ok;
+  ok = canSdoDownloadU32(feederNode(MOTION_SIDE_R), SERVO_OD_TARGET_VELOCITY, 0, 0) && ok;
+  ok = canSdoDownloadU32(feederNode(MOTION_SIDE_L), SERVO_OD_TARGET_VELOCITY, 0, 0) && ok;
+  return ok;
 }
 
 static int32_t feederFeedVelocity(MotionSide side) {
@@ -546,6 +772,8 @@ static const char* feedStageErrorName(FeedStageError err) {
       return "comp_move";
     case FEED_STAGE_ERR_SAFETY:
       return "safety";
+    case FEED_STAGE_ERR_STOP:
+      return "stopped";
     default:
       return "unknown";
   }
@@ -563,6 +791,8 @@ static FeedStageRequest feedStageDefaultRequest() {
 
 static FeedStageResult FeedStage(FeedStageRequest req) {
   FeedStageResult out = {};
+  gFeedAbortRequested = false;
+  gLmAbortRequested = false;
   if (gFeedStageBusy) {
     out.error = FEED_STAGE_ERR_BUSY;
     return out;
@@ -587,15 +817,27 @@ static FeedStageResult FeedStage(FeedStageRequest req) {
   bool sideValidated[MOTION_SIDE_COUNT] = {!req.useR, !req.useL};
   uint32_t tStart = millis();
 
-  if (req.useR) feederRunPv(MOTION_SIDE_R, feederFeedVelocity(MOTION_SIDE_R));
-  if (req.useL) feederRunPv(MOTION_SIDE_L, feederFeedVelocity(MOTION_SIDE_L));
-
   FeedStageError fail = FEED_STAGE_OK;
+  if (req.useR) {
+    encoderSetZero(MOTION_SIDE_R);
+    if (!feederRunPv(MOTION_SIDE_R, feederFeedVelocity(MOTION_SIDE_R)))
+      fail = FEED_STAGE_ERR_FEEDER;
+  }
+  if (fail == FEED_STAGE_OK && req.useL) {
+    encoderSetZero(MOTION_SIDE_L);
+    if (!feederRunPv(MOTION_SIDE_L, feederFeedVelocity(MOTION_SIDE_L)))
+      fail = FEED_STAGE_ERR_FEEDER;
+  }
 
-  while (true) {
+  while (fail == FEED_STAGE_OK) {
     pollSerial();
     uint32_t nowMs = millis();
     motionPollEncoders(nowMs);
+
+    if (gLmAbortRequested || gFeedAbortRequested) {
+      fail = FEED_STAGE_ERR_STOP;
+      break;
+    }
 
     if (safetyIsActive()) {
       fail = FEED_STAGE_ERR_SAFETY;
@@ -613,8 +855,12 @@ static FeedStageResult FeedStage(FeedStageRequest req) {
       MotionSide side = (MotionSide)i;
 
       if (!sideFeedStopped[i] && laserIsOn(side)) {
-        feederStop(side);
-        canSdoDownloadU32(feederNode(side), SERVO_OD_TARGET_VELOCITY, 0, 0);
+        bool stopOk = feederStop(side);
+        stopOk = canSdoDownloadU32(feederNode(side), SERVO_OD_TARGET_VELOCITY, 0, 0) && stopOk;
+        if (!stopOk) {
+          fail = FEED_STAGE_ERR_FEEDER;
+          break;
+        }
         sideFeedStopped[i] = true;
         out.side[i].laserOn = true;
         if (req.checkEncoder) encoderArmSettleAfterStop(side);
@@ -648,9 +894,13 @@ static FeedStageResult FeedStage(FeedStageRequest req) {
       out.error = FEED_STAGE_OK;
       break;
     }
+
+    // Ceder un tick evita ocupar permanentemente el núcleo durante la
+    // alimentación; láser, encoders y Serial se revisan en cada iteración.
+    delay(1);
   }
 
-  feederStopAll();
+  if (!feederStopAll() && fail == FEED_STAGE_OK) fail = FEED_STAGE_ERR_FEEDER;
   if (fail != FEED_STAGE_OK) {
     out.error = fail;
   } else if (req.checkEncoder) {
@@ -722,6 +972,7 @@ static bool modbusParseRxOk(const uint8_t* tx, size_t txLen, const uint8_t* rx, 
 
 static bool modbusTxRx(const uint8_t* tx, size_t txLen, uint8_t* rx, size_t* rxLen, size_t rxCap) {
   while (ModbusSerial.available()) ModbusSerial.read();
+  delay(10);
   ModbusSerial.write(tx, txLen);
   ModbusSerial.flush();
 
@@ -799,7 +1050,7 @@ static bool modbusReadReg32(uint16_t addr, int32_t* out) {
 }
 
 static void modbusBeginHw() {
-  ModbusSerial.begin(MODBUS_ASDA_BAUD, SERIAL_8N1, 16, 17);
+  ModbusSerial.begin(MODBUS_ASDA_BAUD, SERIAL_8N2, 16, 17);
 }
 
 static bool modbusReadReg16(uint16_t addr, uint16_t* out) {
@@ -820,6 +1071,72 @@ static bool modbusReadReg16(uint16_t addr, uint16_t* out) {
   return true;
 }
 
+static float lmClampSpeedRpm(float rpm) {
+  if (rpm < PARAM_LM_PR_SPEED_RPM_MIN) return PARAM_LM_PR_SPEED_RPM_MIN;
+  if (rpm > PARAM_LM_PR_SPEED_RPM_MAX) return PARAM_LM_PR_SPEED_RPM_MAX;
+  return rpm;
+}
+
+static int32_t lmTolPuuFromMm(float tolMm) {
+  return (int32_t)lroundf(tolMm * ASDA_FACTORY_STEPS_PER_MM);
+}
+
+static bool lmPositionWithinTol(int32_t posPuu, int32_t targetPuu, float tolMm) {
+  int32_t d = posPuu - targetPuu;
+  if (d < 0) d = -d;
+  return d <= lmTolPuuFromMm(tolMm);
+}
+
+static bool lmguideIssueMovePr1(int32_t targetPuu) {
+  float rpm = lmClampSpeedRpm(gTune.lmguide.prSpeedRpm);
+  int32_t speed01 = (int32_t)(rpm * 10.0f);
+  if (!modbusWriteReg32(ASDA_REG_P5_060, speed01)) return false;
+  if (!modbusWriteReg32(ASDA_REG_P6_002, 0x00000002)) return false;
+  if (!modbusWriteReg32(ASDA_REG_P6_003, targetPuu)) return false;
+  return modbusWriteReg16(ASDA_REG_P5_007, 1);
+}
+
+// Espera fin de PR: ZSPD + posición dentro de tolerancia (Modbus RTU, sin asunción sobre P5.007).
+static bool lmguideWaitForTarget(int32_t targetPuu, float tolMm, uint32_t timeoutMs) {
+  uint32_t t0 = millis();
+  while (millis() - t0 < timeoutMs) {
+    pollSerial();
+    if (gLmAbortRequested) return false;
+    if (safetyIsActive()) return false;
+    uint16_t dwo = 0;
+    if (!modbusReadReg16(ASDA_REG_P0_046, &dwo)) return false;
+    if ((dwo & ASDA_DO_BIT_ZSPD) == 0) {
+      delay(10);
+      continue;
+    }
+    int32_t pos = 0;
+    if (!modbusReadReg32(ASDA_REG_P5_016, &pos)) return false;
+    if (lmPositionWithinTol(pos, targetPuu, tolMm)) return true;
+    delay(15);
+  }
+  return false;
+}
+
+static bool lmguideMovePr1(int32_t targetPuu) {
+  gLmAbortRequested = false;
+  for (uint8_t attempt = 1; attempt <= PARAM_LM_MOVE_MAX_ATTEMPTS; attempt++) {
+    if (!lmguideIssueMovePr1(targetPuu)) return false;
+    if (lmguideWaitForTarget(targetPuu, PARAM_LM_MOVE_TOLERANCE_MM, PARAM_LM_MOVE_DONE_TIMEOUT_MS))
+      return true;
+    if (gLmAbortRequested) return false;
+    (void)modbusWriteReg16(ASDA_REG_P5_007, 1000);
+    delay(80);
+    uint32_t tw = millis();
+    while (millis() - tw < 400u) {
+      pollSerial();
+      uint16_t dwo = 0;
+      if (modbusReadReg16(ASDA_REG_P0_046, &dwo) && (dwo & ASDA_DO_BIT_ZSPD)) break;
+      delay(15);
+    }
+  }
+  return false;
+}
+
 static bool lmguideServoOn() {
   if (!modbusWriteReg16(ASDA_REG_P2_030, 1)) return false;
   delay(ASDA_SERVO_ON_SETTLE_MS);
@@ -831,37 +1148,43 @@ static bool lmguideServoOff() {
   if (!modbusWriteReg16(ASDA_REG_P2_030, 0xFFFF)) return false;
   if (!modbusWriteReg16(ASDA_REG_P2_030, 0)) return false;
   gRt.lmguideServoOn = false;
+  gRt.lmguideHomed = false;
   return true;
 }
 
-static bool lmguideMovePr1(int32_t targetPuu) {
-  int32_t speed01 = (int32_t)(gTune.lmguide.prSpeedRpm * 10.0f);
-  if (!modbusWriteReg32(ASDA_REG_P5_060, speed01)) return false;
-  if (!modbusWriteReg32(ASDA_REG_P6_002, 0x00000002)) return false;
-  if (!modbusWriteReg32(ASDA_REG_P6_003, targetPuu)) return false;
-  return modbusWriteReg16(ASDA_REG_P5_007, 1);
-}
-
 static bool lmguideStop() {
+  gLmAbortRequested = true;
   return modbusWriteReg16(ASDA_REG_P5_007, 1000);
 }
 
 static bool lmguideJog(int dir) {
   int32_t pos = 0;
+  if (!gRt.lmguideHomed) return false;
   if (!modbusReadReg32(ASDA_REG_P5_016, &pos)) return false;
   int32_t target = pos + dir * ASDA_JOG_DELTA_PUU;
-  return lmguideMovePr1(target);
+  bool ok = lmguideMovePr1(target);
+  if (ok) gRt.lmguideHomed = false;
+  return ok;
 }
 
 static bool lmguideJogDelta(int32_t deltaPuu) {
   int32_t pos = 0;
+  if (!gRt.lmguideHomed) return false;
   if (!modbusReadReg32(ASDA_REG_P5_016, &pos)) return false;
-  return lmguideMovePr1(pos + deltaPuu);
+  bool ok = lmguideMovePr1(pos + deltaPuu);
+  if (ok) gRt.lmguideHomed = false;
+  return ok;
 }
 
 // Homing mecánico ASDA — secuencia ServoLMGuide.h [5], método forward.
 static bool lmguideHome() {
+  gLmAbortRequested = false;
+  gRt.lmguideHomed = false;
   if (!lmguideServoOn()) return false;
+  int32_t puuStart = 0;
+  if (!modbusReadReg32(ASDA_REG_P5_016, &puuStart)) return false;
+  int32_t maxTravelPuu = lmTolPuuFromMm(PARAM_LM_HOME_MAX_TRAVEL_MM);
+
   if (!modbusWriteReg16(ASDA_REG_P1_087, ASDA_HOME_TORQUE_PCT_DEFAULT)) return false;
   if (!modbusWriteReg16(ASDA_REG_P1_088, ASDA_HOME_TIME_MS_DEFAULT)) return false;
   if (!modbusWriteReg16(ASDA_REG_P5_004, ASDA_HOME_METHOD_FORWARD)) return false;
@@ -874,9 +1197,33 @@ static bool lmguideHome() {
 
   uint32_t t0 = millis();
   while (millis() - t0 < PARAM_LM_HOME_DONE_TIMEOUT_MS) {
+    pollSerial();
+    if (gLmAbortRequested) {
+      (void)modbusWriteReg16(ASDA_REG_P5_007, 1000);
+      return false;
+    }
+    if (safetyIsActive()) {
+      (void)modbusWriteReg16(ASDA_REG_P5_007, 1000);
+      return false;
+    }
+    int32_t posNow = 0;
+    if (modbusReadReg32(ASDA_REG_P5_016, &posNow)) {
+      int32_t delta = posNow - puuStart;
+      if (delta < 0) delta = -delta;
+      if (delta > maxTravelPuu) {
+        (void)modbusWriteReg16(ASDA_REG_P5_007, 1000);
+        return false;
+      }
+    }
     uint16_t dwo = 0;
     if (modbusReadReg16(ASDA_REG_P0_046, &dwo)) {
-      if ((dwo & ASDA_DO_BIT_HOME) && (dwo & ASDA_DO_BIT_ZSPD)) return true;
+      if ((dwo & ASDA_DO_BIT_HOME) && (dwo & ASDA_DO_BIT_ZSPD)) {
+        int32_t posEnd = 0;
+        if (!modbusReadReg32(ASDA_REG_P5_016, &posEnd)) return false;
+        if (!lmPositionWithinTol(posEnd, 0, PARAM_LM_HOME_TOLERANCE_MM)) return false;
+        gRt.lmguideHomed = true;
+        return true;
+      }
     }
     delay(50);
   }
@@ -884,6 +1231,7 @@ static bool lmguideHome() {
 }
 
 static bool lmguideMoveModel() {
+  if (!gRt.lmguideHomed) return false;
   if (gData.targetLengthMm <= 0.0f) return false;
   float mm = gData.targetLengthMm + gData.measureCompMm;
   int32_t puu = (int32_t)lroundf(-mm * ASDA_FACTORY_STEPS_PER_MM);
@@ -893,8 +1241,42 @@ static bool lmguideMoveModel() {
 static bool lmguideMoveNamed(const char* name) {
   if (!name) return false;
   if (strncmp(name, "model", 5) == 0) return lmguideMoveModel();
-  if (strncmp(name, "home", 4) == 0) return lmguideMovePr1(0);
+  if (strncmp(name, "home", 4) == 0) {
+    bool ok = lmguideMovePr1(0);
+    if (ok) gRt.lmguideHomed = true;
+    return ok;
+  }
+  if (!gRt.lmguideHomed) return false;
   return lmguideMovePr1(gTune.lmguide.posPuu);
+}
+
+/**
+ * Un solo bloque invocado por Serial: init CAN + feeders + homing del LM Guide (servo ON + home).
+ * set_tune se envía antes desde la HMI; aquí solo ejecutamos la secuencia física.
+ */
+static void motionHwInitRun() {
+  if (safetyIsActive()) {
+    Serial.println(F("{\"op\":\"motion_hw_init\",\"ok\":false,\"error\":\"safety\"}"));
+    return;
+  }
+  bool okFeed = feederInitBus(true);
+  if (!okFeed) {
+    Serial.println(F("{\"op\":\"motion_hw_init\",\"ok\":false,\"error\":\"feeder_init\"}"));
+    return;
+  }
+  bool okHome = lmguideHome();
+  if (!okHome) {
+    Serial.println(F("{\"op\":\"motion_hw_init\",\"ok\":false,\"error\":\"lmguide_home\"}"));
+    return;
+  }
+  Serial.print(F("{\"op\":\"motion_hw_init\",\"ok\":true,\"feeder_init\":true,\"lmguide_home\":true"));
+  Serial.print(F(",\"feeder_r_ready\":"));
+  Serial.print(gRt.feederReady[MOTION_SIDE_R] ? "true" : "false");
+  Serial.print(F(",\"feeder_l_ready\":"));
+  Serial.print(gRt.feederReady[MOTION_SIDE_L] ? "true" : "false");
+  Serial.print(F(",\"lm_homed\":"));
+  Serial.print(gRt.lmguideHomed ? "true" : "false");
+  Serial.println(F("}"));
 }
 
 // ── Serial / telemetría ─────────────────────────────────────────────────────
@@ -934,9 +1316,11 @@ static void printStatusJson() {
   Serial.print(gRt.feederReady[MOTION_SIDE_L] ? "true" : "false");
   Serial.print(F(",\"lm_servo_on\":"));
   Serial.print(gRt.lmguideServoOn ? "true" : "false");
+  Serial.print(F(",\"lm_homed\":"));
+  Serial.print(gRt.lmguideHomed ? "true" : "false");
   Serial.print(F(",\"safety\":"));
   Serial.print(safetyIsActive() ? "true" : "false");
-  Serial.println(F("}"));
+  Serial.println(F(",\"mcu\":\"motion\"}"));
 }
 
 static void applyTuneFromJson(const char* json) {
@@ -955,7 +1339,8 @@ static void applyTuneFromJson(const char* json) {
   gTune.feeder[MOTION_SIDE_L].compensationMm =
       jsonReadFloat(json, "feed_l_comp_mm", gTune.feeder[MOTION_SIDE_L].compensationMm);
 
-  gTune.lmguide.prSpeedRpm = jsonReadFloat(json, "lm_pr_speed_rpm", gTune.lmguide.prSpeedRpm);
+  gTune.lmguide.prSpeedRpm =
+      lmClampSpeedRpm(jsonReadFloat(json, "lm_pr_speed_rpm", gTune.lmguide.prSpeedRpm));
   gTune.lmguide.posPuu = (int32_t)jsonReadLong(json, "lm_pos_puu", gTune.lmguide.posPuu);
 }
 
@@ -1020,6 +1405,10 @@ static void handleSerialLine(char* line) {
     Serial.println(F("{\"op\":\"encoder_set0\",\"ok\":true}"));
     return;
   }
+  if (strstr(line, "\"op\":\"motion_hw_init\"")) {
+    motionHwInitRun();
+    return;
+  }
   if (strstr(line, "\"op\":\"encoder_reset\"")) {
     if (strstr(line, "\"side\":\"L\"")) {
       encoderResetHw(MOTION_SIDE_L);
@@ -1034,13 +1423,22 @@ static void handleSerialLine(char* line) {
   }
   if (strstr(line, "\"op\":\"feeder_init\"")) {
     if (strstr(line, "\"side\":\"both\"") || !strstr(line, "\"side\"")) {
-      feederInitBus();
+      feederInitBus(true);
     } else if (strstr(line, "\"side\":\"L\"")) {
-      feederInitNode(MOTION_SIDE_L);
+      bool ok = feederInitNode(MOTION_SIDE_L);
+      Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
+      Serial.print(ok ? "true" : "false");
+      Serial.print(F(",\"ok_l\":"));
+      Serial.print(ok ? "true" : "false");
+      Serial.println(F("}"));
     } else {
-      feederInitNode(MOTION_SIDE_R);
+      bool ok = feederInitNode(MOTION_SIDE_R);
+      Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
+      Serial.print(ok ? "true" : "false");
+      Serial.print(F(",\"ok_r\":"));
+      Serial.print(ok ? "true" : "false");
+      Serial.println(F("}"));
     }
-    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":true}"));
     return;
   }
   if (strstr(line, "\"op\":\"feeder_jog\"")) {
@@ -1051,13 +1449,19 @@ static void handleSerialLine(char* line) {
     MotionSide side = MOTION_SIDE_R;
     if (strstr(line, "\"side\":\"L\"")) side = MOTION_SIDE_L;
     long dir = jsonReadLong(line, "dir", 1);
-    feederJogStep(side, dir >= 0 ? 1 : -1);
-    Serial.println(F("{\"op\":\"feeder_jog\",\"ok\":true}"));
+    bool ok = feederJogStep(side, dir >= 0 ? 1 : -1);
+    Serial.print(F("{\"op\":\"feeder_jog\",\"ok\":"));
+    Serial.print(ok ? "true" : "false");
+    Serial.println(F("}"));
     return;
   }
   if (strstr(line, "\"op\":\"feeder_stop\"")) {
-    feederStopAll();
-    Serial.println(F("{\"op\":\"feeder_stop\",\"ok\":true}"));
+    gFeedAbortRequested = true;
+    gLmAbortRequested = true;
+    bool ok = feederStopAll();
+    Serial.print(F("{\"op\":\"feeder_stop\",\"ok\":"));
+    Serial.print(ok ? "true" : "false");
+    Serial.println(F("}"));
     return;
   }
   if (strstr(line, "\"op\":\"feed_stage\"")) {
@@ -1108,6 +1512,8 @@ static void handleSerialLine(char* line) {
       Serial.println(F("{\"op\":\"lmguide_move\",\"ok\":false,\"error\":\"safety\"}"));
       return;
     }
+    gTune.lmguide.prSpeedRpm =
+        lmClampSpeedRpm(jsonReadFloat(line, "lm_pr_speed_rpm", gTune.lmguide.prSpeedRpm));
     const char* target = "home";
     const char* key = strstr(line, "\"target\"");
     if (key) {
@@ -1134,6 +1540,8 @@ static void handleSerialLine(char* line) {
       Serial.println(F("{\"op\":\"lmguide_jog\",\"ok\":false,\"error\":\"safety\"}"));
       return;
     }
+    gTune.lmguide.prSpeedRpm =
+        lmClampSpeedRpm(jsonReadFloat(line, "lm_pr_speed_rpm", gTune.lmguide.prSpeedRpm));
     bool ok = false;
     if (strstr(line, "\"delta_puu\"")) {
       ok = lmguideJogDelta((int32_t)jsonReadLong(line, "delta_puu", 0));
@@ -1165,9 +1573,11 @@ static void pollSerial() {
     char c = (char)Serial.read();
     if (c == '\r') continue;
     if (c == '\n') {
-      gSerialLine[gSerialLineLen] = '\0';
-      handleSerialLine(gSerialLine);
+      char line[sizeof(gSerialLine)];
+      memcpy(line, gSerialLine, gSerialLineLen);
+      line[gSerialLineLen] = '\0';
       gSerialLineLen = 0;
+      handleSerialLine(line);
       continue;
     }
     if (gSerialLineLen + 1 < sizeof(gSerialLine)) {
@@ -1176,11 +1586,21 @@ static void pollSerial() {
   }
 }
 
+/** Durante init CAN los delay() bloqueaban el loop y la HMI no recibía status/ping hasta terminar setup(). */
+static void motionYieldMs(uint32_t ms) {
+  uint32_t t0 = millis();
+  while ((uint32_t)(millis() - t0) < ms) {
+    pollSerial();
+    canServiceRxDrain();
+    delay(1);
+  }
+}
+
 // ── Arduino ─────────────────────────────────────────────────────────────────
 
 void setup() {
   Serial.begin(PARAM_SERIAL_BAUD);
-  delay(200);
+  motionYieldMs(SERVO_CAN_POWERUP_MS);
 
   motionTuneSetDefaults(&gTune);
   dataLoadNvs();
@@ -1188,9 +1608,9 @@ void setup() {
   initLasersHw();
   modbusBeginHw();
 
-  if (canBusInit()) {
-    feederInitBus();
-  }
+  // Los feeders CAN se inicializan una sola vez al encender Motion.
+  // feederInitBus es idempotente si después llega la orden manual Iniciar.
+  (void)feederInitBus();
 
   Serial.println(F("{\"op\":\"boot\",\"mcu\":\"motion\"}"));
   printStatusJson();
@@ -1198,6 +1618,7 @@ void setup() {
 
 void loop() {
   pollSerial();
+  canServiceRxDrain();
 
   uint32_t now = millis();
   if (now - gLastEncoderPollMs >= PARAM_ENC_POLL_MS) {

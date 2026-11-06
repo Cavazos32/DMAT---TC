@@ -7,6 +7,22 @@ import time
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
+from werkzeug.serving import WSGIRequestHandler
+
+# Peticiones de sondeo del HMI: no escribir cada GET en la consola (ruido).
+_QUIET_HTTP_LOG_PREFIXES = (
+    "/api/motion/status",
+    "/api/plc/status",
+    "/api/state",
+)
+
+
+class _QuietRequestHandler(WSGIRequestHandler):
+    def log_request(self, code="-", size="-"):
+        path = (getattr(self, "path", "") or "").split("?", 1)[0]
+        if code == 200 and any(path == p or path.startswith(p + "/") for p in _QUIET_HTTP_LOG_PREFIXES):
+            return
+        super().log_request(code, size)
 
 _CLASS_DIR = Path(__file__).resolve().parent / "Class"
 if str(_CLASS_DIR) not in sys.path:
@@ -34,14 +50,35 @@ CHECKLIST_MAX_CYCLES = 10000
 # ServoLMGuide.h [7]: 770 PUU en 45 mm. El sentido de trabajo es PUU negativo.
 LMGUIDE_STEPS_PER_MM = 770.0 / 45.0
 LMGUIDE_PUU_SIGN = -1
+LMGUIDE_PR_RPM_MIN = 400.0
+LMGUIDE_PR_RPM_MAX = 3000.0
+
+# Reset de error: condiciones PLC/Motion despejadas de forma estable (ms).
+_ERROR_RESET_STABLE_MS = 200
 
 # ServoFeeder.h [8]: 3600 counts = 55 mm de cinta. Vale para mm/s → 6081 y mm → 607A.
 FEED_STEPS_PER_MM = 3600.0 / 55.0
 
+# -----------------------------------------------------------------------------
+# ANDON_SKIP_OPCIONAL — TODO_BORRAR
+# Puente de banco: permitir ciclo sin COM del Andon (env HMI_ANDON_SKIP=1 o UI
+# "No usar Andon"). Cuando en planta siempre haya cable, borrar todo el bloque
+# marcado con este tag en app.py, static/js/main.js y el párrafo en rutinas-operador.md.
+# -----------------------------------------------------------------------------
+_ANDON_SKIPPED_ENV = os.environ.get("HMI_ANDON_SKIP", "0").strip() == "1"
+_ANDON_NONE_TOKEN = "__none__"
+# --- fin constantes ANDON_SKIP_OPCIONAL ---
+
 _serial_lock = threading.Lock()
+_motion_write_lock = threading.Lock()
 _motion_serial = None
 _serial_cfg_lock = threading.Lock()
-_serial_cfg = {"motion": "", "plc": "", "andon": ""}
+_serial_cfg = {
+    "motion": "",
+    "plc": "",
+    "andon": "",
+    "andon_disabled": False,  # ANDON_SKIP_OPCIONAL — TODO_BORRAR (quitar clave y usos)
+}
 
 # Orquestador del ciclo automático (rules.md §4.1–4.8) — app.py coordina Motion + PLC.
 _STATE_LOCK = threading.Lock()
@@ -183,6 +220,14 @@ def _as_int(src, path, default):
         return int(default)
 
 
+def _clamp_lm_pr_speed_rpm(value) -> float:
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        x = 1200.0
+    return max(LMGUIDE_PR_RPM_MIN, min(LMGUIDE_PR_RPM_MAX, x))
+
+
 def _canonical_motion_tune(src):
     """Parámetros persistidos en Motion.json. Defaults alineados con Parameters.h."""
     src = src if isinstance(src, dict) else {}
@@ -200,7 +245,7 @@ def _canonical_motion_tune(src):
             },
         },
         "lmguide": {
-            "pr_speed_rpm": _as_float(src, ("lmguide", "pr_speed_rpm"), 1200.0),
+            "pr_speed_rpm": _clamp_lm_pr_speed_rpm(_as_float(src, ("lmguide", "pr_speed_rpm"), 1200.0)),
             "pos_puu": _as_int(src, ("lmguide", "pos_puu"), 0),
         },
     }
@@ -447,23 +492,41 @@ def _build_motion_lines(op: str, tune: dict, body: dict):
         return tune, [_compact({"op": "encoder_reset", "side": side})]
     if op == "feeder_init":
         return tune, [tune_line, '{"op":"feeder_init","side":"both"}']
+    if op == "motion_hw_init":
+        # set_tune + un solo bloque en firmware (CAN + feeders + LM home)
+        return tune, [tune_line, '{"op":"motion_hw_init"}']
     if op == "lmguide_init":
-        return tune, [tune_line, '{"op":"lmguide_servo_on"}']
+        return tune, ['{"op":"lmguide_servo_on"}']
     if op == "lmguide_servo":
         if body.get("on"):
-            return tune, [tune_line, '{"op":"lmguide_servo_on"}']
+            return tune, ['{"op":"lmguide_servo_on"}']
         return tune, ['{"op":"lmguide_servo_off"}']
     if op == "lmguide_home":
         return tune, ['{"op":"lmguide_home"}']
     if op == "lmguide_move_home":
-        return tune, [tune_line, '{"op":"lmguide_move","target":"home"}']
+        return tune, [
+            _compact(
+                {
+                    "op": "lmguide_move",
+                    "target": "home",
+                    "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+                }
+            )
+        ]
     if op == "lmguide_move":
         if body.get("mm") is None or body.get("mm") == "":
             raise ValueError("Falta la posición en mm.")
         puu = _mm_to_puu(body.get("mm"))
         tune["lmguide"]["pos_puu"] = puu
-        tune_line = _compact(_motion_tune_flat(tune))
-        return tune, [tune_line, _compact({"op": "lmguide_move", "puu": puu})]
+        return tune, [
+            _compact(
+                {
+                    "op": "lmguide_move",
+                    "puu": puu,
+                    "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+                }
+            )
+        ]
     if op == "lmguide_jog":
         if body.get("jog_mm") is None or body.get("jog_mm") == "":
             raise ValueError("Falta el jog en mm.")
@@ -472,7 +535,15 @@ def _build_motion_lines(op: str, tune: dict, body: dict):
             raise ValueError("El jog en mm tiene que ser distinto de cero.")
         direction = 1 if int(body.get("dir") or 1) >= 0 else -1
         delta = _mm_to_puu(direction * abs(jog_mm))
-        return tune, [tune_line, _compact({"op": "lmguide_jog", "delta_puu": delta})]
+        return tune, [
+            _compact(
+                {
+                    "op": "lmguide_jog",
+                    "delta_puu": delta,
+                    "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+                }
+            )
+        ]
     if op == "lmguide_stop":
         return tune, ['{"op":"lmguide_stop"}']
     raise ValueError("Orden Motion no reconocida.")
@@ -480,7 +551,11 @@ def _build_motion_lines(op: str, tune: dict, body: dict):
 
 def _reply_wait_s(line: str) -> float:
     if "lmguide_home" in line:
-        return 40.0
+        return 90.0
+    if "lmguide_move" in line:
+        return 95.0
+    if "motion_hw_init" in line:
+        return 120.0
     if "feeder_init" in line or "lmguide_servo_on" in line:
         return 8.0
     return 2.0
@@ -490,6 +565,8 @@ def _load_serial_cfg() -> None:
     motion = os.environ.get("MOTION_SERIAL", "").strip()
     plc = os.environ.get("PLC_SERIAL", "").strip()
     andon = os.environ.get("ANDON_SERIAL", "").strip()
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR ---
+    andon_disabled = False
     if SERIAL_PATH.exists():
         try:
             saved = json.loads(SERIAL_PATH.read_text(encoding="utf-8"))
@@ -499,10 +576,22 @@ def _load_serial_cfg() -> None:
             motion = str(saved.get("motion") or "").strip()
             plc = str(saved.get("plc") or "").strip()
             andon = str(saved.get("andon") or "").strip()
+            andon_disabled = bool(saved.get("andon_disabled"))
+    if andon_disabled:
+        andon = ""
     with _serial_cfg_lock:
         _serial_cfg["motion"] = motion
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
+        _serial_cfg["andon_disabled"] = andon_disabled
+    # --- fin ANDON_SKIP_OPCIONAL (_load_serial_cfg) ---
+
+
+def _andon_skipped_effective() -> bool:
+    """ANDON_SKIP_OPCIONAL — TODO_BORRAR: True si no se exige/enlaza el MCU Andon."""
+    with _serial_cfg_lock:
+        disabled = bool(_serial_cfg.get("andon_disabled"))
+    return _ANDON_SKIPPED_ENV or disabled
 
 
 def _serial_port(which: str) -> str:
@@ -570,43 +659,106 @@ def _match_listed_port(value: str, ports: list[dict]) -> str:
     return ""
 
 
-def _save_serial_cfg(motion: str, plc: str, andon: str) -> None:
+def _save_serial_cfg(motion: str, plc: str, andon: str, andon_disabled: bool) -> None:
+    """Guarda serial.json. Parámetro andon_disabled: ANDON_SKIP_OPCIONAL — TODO_BORRAR."""
     motion = str(motion or "").strip()
     plc = str(plc or "").strip()
     andon = str(andon or "").strip()
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR ---
+    if andon_disabled:
+        andon = ""
+    # ---
     with _serial_cfg_lock:
         prev_motion = _serial_cfg["motion"]
         prev_plc = _serial_cfg["plc"]
         prev_andon = _serial_cfg["andon"]
+        prev_ad = bool(_serial_cfg.get("andon_disabled"))
         _serial_cfg["motion"] = motion
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
+        _serial_cfg["andon_disabled"] = bool(andon_disabled)
     SERIAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR: quitar clave andon_disabled del JSON ---
     SERIAL_PATH.write_text(
-        json.dumps({"motion": motion, "plc": plc, "andon": andon}, indent=2) + "\n",
+        json.dumps(
+            {"motion": motion, "plc": plc, "andon": andon, "andon_disabled": bool(andon_disabled)},
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     if motion != prev_motion:
         _close_motion_serial()
     if plc != prev_plc:
         _close_plc_serial()
-    if andon != prev_andon:
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR: la condición incluye prev_ad ---
+    if andon != prev_andon or bool(andon_disabled) != prev_ad:
         _close_andon_serial()
+
+
+def _serial_rx_flush(ser) -> None:
+    """Descarta datos ya en cola RX (boot/status al conectar) para no mezclar con la respuesta al comando."""
+    try:
+        ser.reset_input_buffer()
+    except Exception:
+        pass
+    try:
+        t_end = time.time() + 0.05
+        while time.time() < t_end:
+            n = getattr(ser, "in_waiting", 0) or 0
+            if n:
+                ser.read(n)
+            else:
+                time.sleep(0.01)
+    except Exception:
+        pass
 
 
 def _read_serial_line(ser, timeout_s: float) -> str:
     deadline = time.time() + timeout_s
     buf = b""
     while time.time() < deadline:
-        chunk = ser.read(ser.in_waiting or 1)
+        # Leer hasta el fin de línea sin consumir bytes de la respuesta
+        # siguiente. read(in_waiting) descartaba todo lo posterior al primer \n.
+        chunk = ser.read(1)
         if chunk:
-            buf += chunk
-            if b"\n" in buf:
-                line, _, _rest = buf.partition(b"\n")
-                return line.decode("utf-8", "replace").strip()
+            if chunk == b"\n":
+                return buf.decode("utf-8", "replace").strip()
+            if chunk != b"\r":
+                buf += chunk
         else:
             time.sleep(0.02)
     return buf.decode("utf-8", "replace").strip()
+
+
+def _read_lines_until_op(
+    ser,
+    want_op: str,
+    budget_s: float,
+    max_lines: int = 800,
+    trace_prefix: str | None = None,
+) -> list[str]:
+    """Lee líneas completas hasta la respuesta pedida, conservando las intermedias."""
+    out: list[str] = []
+    deadline = time.time() + max(0.05, budget_s)
+    while time.time() < deadline and len(out) < max_lines:
+        rem = deadline - time.time()
+        if rem <= 0:
+            break
+        line = _read_serial_line(ser, min(2.0, rem))
+        if not line:
+            time.sleep(0.02)
+            continue
+        out.append(line)
+        if trace_prefix:
+            print(f"{trace_prefix} {line}", flush=True)
+        try:
+            msg = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == want_op:
+            break
+    return out
 
 
 _plc_serial = None
@@ -659,14 +811,22 @@ def _send_plc_serial(lines):
                 ser.rts = False
                 ser.open()
                 time.sleep(0.05)
+                _serial_rx_flush(ser)
                 _plc_serial = ser
             ser = _plc_serial
             for line in lines:
                 ser.write((line + "\n").encode("ascii", "replace"))
                 ser.flush()
-                reply = _read_serial_line(ser, 2.0)
-                if reply:
-                    replies.append(reply)
+                try:
+                    expected_op = str(json.loads(line).get("op") or "")
+                except (TypeError, json.JSONDecodeError):
+                    expected_op = ""
+                if expected_op:
+                    replies.extend(_read_lines_until_op(ser, expected_op, 2.0))
+                else:
+                    reply = _read_serial_line(ser, 2.0)
+                    if reply:
+                        replies.append(reply)
     except Exception as exc:
         return {"sent": False, "reason": str(exc), "replies": replies}
     return {"sent": True, "reason": "", "replies": replies}
@@ -712,14 +872,22 @@ def _send_andon_serial(lines):
                 ser.rts = False
                 ser.open()
                 time.sleep(0.05)
+                _serial_rx_flush(ser)
                 _andon_serial = ser
             ser = _andon_serial
             for line in lines:
                 ser.write((line + "\n").encode("ascii", "replace"))
                 ser.flush()
-                reply = _read_serial_line(ser, 2.0)
-                if reply:
-                    replies.append(reply)
+                try:
+                    expected_op = str(json.loads(line).get("op") or "")
+                except (TypeError, json.JSONDecodeError):
+                    expected_op = ""
+                if expected_op:
+                    replies.extend(_read_lines_until_op(ser, expected_op, 2.0))
+                else:
+                    reply = _read_serial_line(ser, 2.0)
+                    if reply:
+                        replies.append(reply)
     except Exception as exc:
         return {"sent": False, "reason": str(exc), "replies": replies}
     return {"sent": True, "reason": "", "replies": replies}
@@ -774,6 +942,8 @@ def _status_module(replies) -> str:
             continue
         if msg.get("op") != "status":
             continue
+        if msg.get("mcu") == "motion":
+            return "motion"
         if msg.get("mcu") == "andon" or (
             "state" in msg and "cutter_r" not in msg and "feeder_r_ready" not in msg
         ):
@@ -791,7 +961,12 @@ def _check_module_link(which: str) -> tuple[bool, str]:
         missing_port, wrong, silent = "E041", "E042", "E043"
         if not _serial_port("motion"):
             return False, missing_port
-        sent = _send_motion_serial(['{"op":"status"}'], line_timeout_s=2.0)
+        # En arranque el Motion puede tardar en init CAN y enviar muchas líneas antes del status al pedirlo.
+        sent = _send_motion_serial(
+            ['{"op":"status"}'],
+            line_timeout_s=90.0,
+            reply_until_op="status",
+        )
     elif which == "plc":
         missing_port, wrong, silent = "E017", "E018", "E019"
         if not _serial_port("plc"):
@@ -815,8 +990,14 @@ def _check_module_link(which: str) -> tuple[bool, str]:
 
 
 def _links_ready_for_cycle() -> tuple[bool, str]:
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR: dejar solo ("motion", "plc", "andon") ---
+    modules: tuple[str, ...] = (
+        ("motion", "plc")
+        if _andon_skipped_effective()
+        else ("motion", "plc", "andon")
+    )
     messages = []
-    for which in ("motion", "plc", "andon"):
+    for which in modules:
         ok, code = _check_module_link(which)
         if not ok:
             messages.append(error_codes.format_message(code))
@@ -899,7 +1080,12 @@ def _plc_active_errors(status: dict | None) -> list[dict]:
     return items
 
 
-def _send_motion_serial(lines, line_timeout_s=None):
+def _send_motion_serial(
+    lines,
+    line_timeout_s=None,
+    reply_until_op: str | None = None,
+    nonblocking: bool = False,
+):
     port = _serial_port("motion")
     if not port:
         return {
@@ -918,41 +1104,84 @@ def _send_motion_serial(lines, line_timeout_s=None):
 
     replies = []
     global _motion_serial
+    acquired = _serial_lock.acquire(blocking=not nonblocking)
+    if not acquired:
+        return {"sent": False, "reason": "Motion ocupado.", "replies": [], "busy": True}
     try:
-        with _serial_lock:
-            if (
-                _motion_serial is None
-                or not _motion_serial.is_open
-                or getattr(_motion_serial, "port", None) != port
-            ):
-                if _motion_serial is not None:
-                    try:
-                        _motion_serial.close()
-                    except Exception:
-                        pass
-                ser = serial.Serial()
-                ser.port = port
-                ser.baudrate = int(os.environ.get("MOTION_SERIAL_BAUD", "115200"))
-                ser.timeout = 0.05
-                ser.write_timeout = 2
-                ser.dtr = False
-                ser.rts = False
-                ser.open()
-                time.sleep(0.05)
-                _motion_serial = ser
-            ser = _motion_serial
-            for line in lines:
+        if (
+            _motion_serial is None
+            or not _motion_serial.is_open
+            or getattr(_motion_serial, "port", None) != port
+        ):
+            if _motion_serial is not None:
+                try:
+                    _motion_serial.close()
+                except Exception:
+                    pass
+            ser = serial.Serial()
+            ser.port = port
+            ser.baudrate = int(os.environ.get("MOTION_SERIAL_BAUD", "115200"))
+            ser.timeout = 0.05
+            ser.write_timeout = 2
+            ser.dtr = False
+            ser.rts = False
+            ser.open()
+            time.sleep(0.05)
+            _serial_rx_flush(ser)
+            _motion_serial = ser
+        ser = _motion_serial
+        for index, line in enumerate(lines):
+            trace_motion = '"op":"status"' not in line
+            if trace_motion:
+                print(f"[Motion TX] {line}", flush=True)
+            with _motion_write_lock:
                 ser.write((line + "\n").encode("ascii", "replace"))
                 ser.flush()
-                reply = _read_serial_line(
-                    ser,
-                    line_timeout_s if line_timeout_s is not None else _reply_wait_s(line),
+            try:
+                expected_op = str(json.loads(line).get("op") or "")
+            except (TypeError, json.JSONDecodeError):
+                expected_op = ""
+            if reply_until_op and index == len(lines) - 1:
+                expected_op = reply_until_op
+            wait_s = line_timeout_s if line_timeout_s is not None else _reply_wait_s(line)
+            if expected_op:
+                replies.extend(
+                    _read_lines_until_op(
+                        ser,
+                        expected_op,
+                        wait_s,
+                        trace_prefix="[Motion RX]" if trace_motion else None,
+                    )
                 )
+            else:
+                reply = _read_serial_line(ser, wait_s)
                 if reply:
                     replies.append(reply)
+                    if trace_motion:
+                        print(f"[Motion RX] {reply}", flush=True)
     except Exception as exc:
         return {"sent": False, "reason": str(exc), "replies": replies}
+    finally:
+        _serial_lock.release()
     return {"sent": True, "reason": "", "replies": replies}
+
+
+def _send_motion_urgent(lines):
+    """Escribe paros sin esperar el lock ocupado por una orden larga."""
+    global _motion_serial
+    if not _serial_lock.locked():
+        return _send_motion_serial(lines, line_timeout_s=2.0)
+    ser = _motion_serial
+    if ser is None or not ser.is_open:
+        return {"sent": False, "reason": "Motion ocupado sin puerto abierto.", "replies": []}
+    try:
+        with _motion_write_lock:
+            for line in lines:
+                ser.write((line + "\n").encode("ascii", "replace"))
+            ser.flush()
+    except Exception as exc:
+        return {"sent": False, "reason": str(exc), "replies": []}
+    return {"sent": True, "reason": "", "replies": [], "urgent": True}
 
 
 def _motion_data_flat(data: dict) -> dict:
@@ -1179,6 +1408,7 @@ def _cycle_plc_send(payload: dict):
     except (TypeError, ValueError):
         line = _compact(payload)
     sent = _send_plc_serial([line])
+    sent["last_payload"] = payload
     if not sent.get("sent"):
         sent["code"] = "E019" if _serial_port("plc") else "E017"
         _push_event(error_codes.format_message(sent["code"]), "error")
@@ -1190,12 +1420,89 @@ def _cycle_plc_send(payload: dict):
 def _cycle_motion_send(payload: dict, timeout_s: float = 2.0):
     line = _compact(payload)
     sent = _send_motion_serial([line], line_timeout_s=timeout_s)
+    sent["last_payload"] = payload
     if sent.get("sent"):
         _push_event(f"[Motion] {line}")
     else:
         sent["code"] = "E043" if _serial_port("motion") else "E041"
         _push_event(error_codes.format_message(sent["code"]), "error")
     return sent
+
+
+def _serial_reply_ok(sent: dict, op: str, fallback: str) -> bool:
+    """True si hubo envío y la última respuesta JSON con ese op tiene ok (por defecto True)."""
+    if not sent.get("sent"):
+        _cycle_fail(sent.get("code") or fallback)
+        return False
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == op:
+            if not bool(msg.get("ok", True)):
+                _cycle_fail("E044" if op in ("lmguide_move", "lmguide_home", "set_tune", "set_data") else fallback)
+                return False
+            return True
+    _cycle_fail(fallback)
+    return False
+
+
+def _motion_status_get() -> dict | None:
+    sent = _send_motion_serial(
+        ['{"op":"status"}'],
+        line_timeout_s=90.0,
+        reply_until_op="status",
+    )
+    if not sent.get("sent"):
+        return None
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == "status":
+            return msg
+    return None
+
+
+def _motion_ready_for_cycle() -> tuple[bool, str]:
+    status = _motion_status_get()
+    if status is None:
+        return False, error_codes.format_message("E043")
+    if status.get("safety") is True:
+        return False, error_codes.format_message("E039")
+    if status.get("feeder_r_ready") is not True or status.get("feeder_l_ready") is not True:
+        return False, error_codes.format_message("E032")
+    if status.get("lm_servo_on") is not True or status.get("lm_homed") is not True:
+        return False, error_codes.format_message("E044")
+    return True, ""
+
+
+def _plc_cmd_ok(sent: dict, fallback: str) -> bool:
+    op = str((sent.get("last_payload") or {}).get("op") or "")
+    if not op:
+        for raw in reversed(sent.get("replies") or []):
+            try:
+                msg = json.loads(raw)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(msg, dict) and msg.get("op"):
+                op = str(msg.get("op"))
+                break
+    if not op:
+        if sent.get("sent"):
+            return True
+        _cycle_fail(sent.get("code") or fallback)
+        return False
+    return _serial_reply_ok(sent, op, fallback)
+
+
+def _motion_cmd_serial_ok(sent: dict, fallback: str) -> bool:
+    op = str((sent.get("last_payload") or {}).get("op") or "")
+    if not op:
+        return _sent_ok(sent, fallback)
+    return _serial_reply_ok(sent, op, fallback)
 
 
 def _sent_ok(sent: dict, fallback: str) -> bool:
@@ -1377,20 +1684,28 @@ def _fail_feed_stage(error_name: str) -> None:
 def _cycle_move_lm_mm(mm: float) -> bool:
     tune = _load_motion_tune()
     puu = _mm_to_puu(mm)
-    if not _sent_ok(_cycle_motion_send(_motion_tune_flat(tune), timeout_s=2.0), "E043"):
-        return False
-    return _sent_ok(_cycle_motion_send({"op": "lmguide_move", "puu": puu}, timeout_s=40.0), "E043")
+    return _motion_cmd_serial_ok(
+        _cycle_motion_send(
+            {
+                "op": "lmguide_move",
+                "puu": puu,
+                "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+            },
+            timeout_s=90.0,
+        ),
+        "E043",
+    )
 
 
 def _cycle_run_step(step_id: str, params: dict) -> bool:
     # Step 1. Start — publicar datos de ciclo (modelo, longitud, tolerancia) al MCU Motion.
     if step_id == "1":
         flat = _motion_data_flat(_MOTION_DATA)
-        return _sent_ok(_cycle_motion_send(flat, timeout_s=2.0), "E043")
+        return _motion_cmd_serial_ok(_cycle_motion_send(flat, timeout_s=2.0), "E043")
 
     # Step 2. Activar holder dual y encoder dual juntos; esperar estabilización.
     if step_id == "2":
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": True}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": True}), "E019"):
             return False
         if not _cycle_sleep_ms(int(params["ms_holder_enc_stable"])):
             return False
@@ -1421,9 +1736,9 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
 
     # Step 4. Activar pinzas; desactivar holder y encoder; esperar.
     if step_id == "4":
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True}), "E019"):
             return False
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": False}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": False}), "E019"):
             return False
         if not _cycle_sleep_ms(int(params["ms_after_grip_release"])):
             return False
@@ -1453,11 +1768,11 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
         valve = {"R": "cutter_r", "L": "cutter_l", "LR": "cutters"}[sides]
         side_name = {"R": "derecho", "L": "izquierdo", "LR": "L y R"}[sides]
         _set_machine_ui(mensaje=_cycle_piece_prefix() + f"Corte {side_name}.")
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": True}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": True}), "E019"):
             return False
         if not _cycle_sleep_ms(int(params["ms_cutter_on"])):
             return False
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": False}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": False}), "E019"):
             return False
         return _cycle_sleep_ms(int(params["ms_after_cutter"]))
 
@@ -1473,7 +1788,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         if not _cycle_sleep_ms(int(params["ms_lm_at_discharge"])):
             return False
-        if not _sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False}), "E019"):
             return False
         return _cycle_sleep_ms(int(params["ms_after_grip_release"]))
 
@@ -1494,24 +1809,56 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             _push_event(f"Despeje de pinzas: {clear_at:.2f} mm.")
             if not _cycle_move_lm_mm(clear_at):
                 return False
-        if not _sent_ok(_cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=40.0), "E043"):
-            return False
+        home_result: dict = {}
+
+        def send_home() -> None:
+            home_result["sent"] = _cycle_motion_send(
+                {"op": "lmguide_move", "target": "home"}, timeout_s=90.0
+            )
+
+        home_thread = threading.Thread(target=send_home, daemon=True)
+        home_thread.start()
         if not _cycle_sleep_ms(int(params["ms_blower_delay"])):
+            _send_motion_urgent(['{"op":"lmguide_stop"}'])
             return False
         blower_ms = _cycle_blower_duration_ms(params)
-        if not _sent_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
+            _send_motion_urgent(['{"op":"lmguide_stop"}'])
             return False
-        blower_t0 = time.time()
-        home_deadline = time.time() + 30.0
-        while True:
+        blower_deadline = time.time() + (blower_ms / 1000.0)
+
+        while home_thread.is_alive():
             if _cycle_wait_if_paused():
+                _send_motion_urgent(['{"op":"lmguide_stop"}'])
+                _cycle_plc_send({"op": "blower_off"})
                 return False
-            blower_done = (time.time() - blower_t0) >= (blower_ms / 1000.0)
-            home_done = time.time() >= home_deadline
-            if blower_done and home_done:
+            home_thread.join(0.05)
+
+        if not _motion_cmd_serial_ok(home_result.get("sent") or {}, "E043"):
+            return False
+
+        t_home_ok = time.time()
+        home_confirmed = False
+        while time.time() - t_home_ok < 3.0:
+            if _cycle_wait_if_paused():
+                _cycle_plc_send({"op": "blower_off"})
+                return False
+            mst = _motion_status_get()
+            if mst and mst.get("lm_homed") is True:
+                home_confirmed = True
                 break
             time.sleep(0.05)
-        return _cycle_sleep_ms(int(params["ms_at_home_end"]))
+        if not home_confirmed:
+            _cycle_fail("E044")
+            return False
+
+        home_settle_deadline = time.time() + (int(params["ms_at_home_end"]) / 1000.0)
+        while time.time() < max(blower_deadline, home_settle_deadline):
+            if _cycle_wait_if_paused():
+                _cycle_plc_send({"op": "blower_off"})
+                return False
+            time.sleep(0.05)
+        return True
 
     return True
 
@@ -1561,8 +1908,8 @@ def _home_after_tray() -> bool:
         mensaje="Charola vacía. Regresando el eje a cero.",
         en_curso=True,
     )
-    sent = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=40.0)
-    if sent.get("sent"):
+    sent = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=90.0)
+    if _motion_cmd_serial_ok(sent, "E043"):
         return True
     _LOT["tray_wait"] = True
     _push_event("El eje no volvió a cero. Confirma otra vez cuando pueda moverse.", "error")
@@ -1714,6 +2061,9 @@ def _cycle_start() -> tuple[bool, str]:
     ready, link_err = _links_ready_for_cycle()
     if not ready:
         return False, link_err
+    ready, motion_err = _motion_ready_for_cycle()
+    if not ready:
+        return False, motion_err
     _announce_trays(cycles, plan)
     _LOT["active"] = True
     _LOT["tray_wait"] = False
@@ -1820,6 +2170,10 @@ def _cycle_stop() -> None:
     _CYCLE_CTRL["stop"].set()
     _CYCLE_CTRL["pause_after_step"].clear()
     _ROUTINE["stop"].set()
+    if _serial_port("motion"):
+        _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
+    if _serial_port("plc"):
+        _send_plc_serial([_compact({"op": "blower_off"})])
     if was_tray and not running:
         _set_machine_ui(
             estado="stopped",
@@ -1838,9 +2192,48 @@ def _cycle_stop() -> None:
     _push_event("Stop solicitado — detención inmediata.", "warn")
 
 
+def _error_physical_clear_now() -> bool:
+    """True si no hay fallas PLC ni seguridad Motion activas (lectura puntual)."""
+    plc_port = bool(_serial_port("plc"))
+    motion_port = bool(_serial_port("motion"))
+    if plc_port:
+        st = _plc_status_get()
+        if st is None:
+            return False
+        if error_codes.plc_fault_codes(st):
+            return False
+    if motion_port:
+        mst = _motion_status_get()
+        if mst is None:
+            return False
+        if mst.get("safety") is True:
+            return False
+    return True
+
+
+def _wait_error_physical_clear_stable() -> bool:
+    """Condiciones despejadas durante _ERROR_RESET_STABLE_MS seguidos."""
+    need_s = max(0.05, _ERROR_RESET_STABLE_MS / 1000.0)
+    clear_since = None
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if not _error_physical_clear_now():
+            clear_since = None
+        else:
+            now = time.time()
+            if clear_since is None:
+                clear_since = now
+            elif now - clear_since >= need_s:
+                return True
+        time.sleep(0.05)
+    return False
+
+
 def _cycle_reset_error() -> tuple[bool, str]:
     if not _MACHINE_STATE.get("ciclo_error"):
         return True, ""
+    if not _wait_error_physical_clear_stable():
+        return False, error_codes.format_message("E046")
     en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
     _set_machine_ui(
         ciclo_error="",
@@ -2070,6 +2463,67 @@ def _feed_once(side: str | None):
     return True, "", feed
 
 
+def _feeder_test(side: str, tune: dict) -> dict:
+    """Cierra holder/encoder y ejecuta FeedStage de un solo lado."""
+    busy = _motion_owner_busy()
+    if busy:
+        return {"ok": False, "error": busy}
+
+    for module in ("motion", "plc"):
+        linked, code = _check_module_link(module)
+        if not linked:
+            return {"ok": False, "error": error_codes.format_message(code)}
+
+    plc_sent = _cycle_plc_send(
+        {"op": "valve", "name": "holder_encoder", "on": True}
+    )
+    if not plc_sent.get("sent"):
+        return {
+            "ok": False,
+            "error": plc_sent.get("reason")
+            or error_codes.format_message(plc_sent.get("code") or "E019"),
+        }
+
+    params = _load_cycle_params()
+    time.sleep(max(0, int(params["ms_holder_enc_stable"])) / 1000.0)
+    holder_ok, code = _plc_confirm({"holder": True, "encoder": True})
+    if not holder_ok:
+        return {
+            "ok": False,
+            "error": error_codes.format_message(code or "E010"),
+        }
+
+    tune_payload = _motion_tune_flat(tune)
+    tune_sent = _cycle_motion_send(tune_payload, timeout_s=2.0)
+    if not _motion_cmd_ok(tune_sent, "set_tune"):
+        return {
+            "ok": False,
+            "error": tune_sent.get("reason") or "Motion no aceptó los parámetros.",
+        }
+
+    feed_payload = {"op": "feed_stage", "side": side}
+    feed_sent = _cycle_motion_send(feed_payload, timeout_s=65.0)
+    found, feed_ok, error_name, feed = _read_feed_stage(feed_sent)
+    _set_machine_ui(feed=feed)
+    replies = (tune_sent.get("replies") or []) + (feed_sent.get("replies") or [])
+    if not feed_sent.get("sent"):
+        return {
+            "ok": False,
+            "error": feed_sent.get("reason") or error_codes.format_message("E043"),
+            "lines": [_compact(tune_payload), _compact(feed_payload)],
+            "replies": replies,
+        }
+    return {
+        "ok": True,
+        "sent": True,
+        "command_ok": bool(found and feed_ok),
+        "error": "" if found and feed_ok else error_codes.feed_stage_message(error_name or "unknown"),
+        "lines": [_compact(tune_payload), _compact(feed_payload)],
+        "replies": replies,
+        "feed": feed,
+    }
+
+
 def _feed_clean():
     payload = {"op": "feed_stage", "mode": "clean", "timeout_ms": PURGE_CLEAN_MS}
     sent = _cycle_motion_send(payload, timeout_s=8.0)
@@ -2085,11 +2539,16 @@ def _feed_clean():
 
 def _routine_move_lm_mm(mm: float) -> bool:
     tune = _load_motion_tune()
-    if not _cycle_motion_send(_motion_tune_flat(tune), timeout_s=2.0).get("sent"):
-        return False
     if _ROUTINE["stop"].is_set():
         return False
-    move = _cycle_motion_send({"op": "lmguide_move", "puu": _mm_to_puu(mm)}, timeout_s=40.0)
+    move = _cycle_motion_send(
+        {
+            "op": "lmguide_move",
+            "puu": _mm_to_puu(mm),
+            "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+        },
+        timeout_s=40.0,
+    )
     return _motion_cmd_ok(move, "lmguide_move")
 
 
@@ -2215,7 +2674,8 @@ def _purge_cut() -> bool:
     )
 
     def sent_ok(sent) -> bool:
-        return bool(sent.get("sent")) and not _ROUTINE["stop"].is_set()
+        op = str((sent.get("last_payload") or {}).get("op") or "")
+        return bool(op and _motion_cmd_ok(sent, op)) and not _ROUTINE["stop"].is_set()
 
     if not sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True})):
         return False
@@ -2236,9 +2696,14 @@ def _purge_cut() -> bool:
             _cut_mm, disc = pos
             tune = _load_motion_tune()
             puu = _mm_to_puu(disc)
-            if not sent_ok(_cycle_motion_send(_motion_tune_flat(tune), timeout_s=2.0)):
-                return False
-            move = _cycle_motion_send({"op": "lmguide_move", "puu": puu}, timeout_s=40.0)
+            move = _cycle_motion_send(
+                {
+                    "op": "lmguide_move",
+                    "puu": puu,
+                    "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+                },
+                timeout_s=40.0,
+            )
             if not _motion_cmd_ok(move, "lmguide_move"):
                 return False
             if not _routine_sleep_ms(int(params["ms_lm_at_discharge"])):
@@ -2447,11 +2912,18 @@ def _feeder_init_now() -> tuple[bool, str]:
     ok_link, code = _check_module_link("motion")
     if not ok_link:
         return False, error_codes.format_message(code)
-    sent = _cycle_motion_send({"op": "feeder_init", "side": "both"}, timeout_s=8.0)
-    if not _motion_cmd_ok(sent, "feeder_init"):
+    tune = _load_motion_tune()
+    lines = _build_motion_lines("motion_hw_init", tune, {})[1]
+    sent = _send_motion_serial(
+        lines,
+        line_timeout_s=120.0,
+        reply_until_op="motion_hw_init",
+    )
+    sent["last_payload"] = {"op": "motion_hw_init"}
+    if not _motion_cmd_ok(sent, "motion_hw_init"):
         return False, error_codes.format_message(sent.get("code") or "E043")
-    _push_event("Alimentadores inicializados.")
-    return True, "Alimentadores inicializados."
+    _push_event("Hardware Motion inicializado (CAN + LM home).")
+    return True, "Hardware Motion inicializado (CAN + LM home)."
 
 
 def _prealimentador_iniciar(_data=None) -> tuple[bool, str]:
@@ -2600,9 +3072,15 @@ def _checklist_recorrido_run() -> None:
         _cut_mm, disc = pos
         tune = _load_motion_tune()
         puu = _mm_to_puu(disc)
-        tune_sent = _cycle_motion_send(_motion_tune_flat(tune), timeout_s=2.0)
-        move = _cycle_motion_send({"op": "lmguide_move", "puu": puu}, timeout_s=40.0)
-        if _ROUTINE["stop"].is_set() or not tune_sent.get("sent") or not _motion_cmd_ok(move, "lmguide_move"):
+        move = _cycle_motion_send(
+            {
+                "op": "lmguide_move",
+                "puu": puu,
+                "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+            },
+            timeout_s=40.0,
+        )
+        if _ROUTINE["stop"].is_set() or not _motion_cmd_ok(move, "lmguide_move"):
             _set_routine_ui(rutina="", mensaje="El recorrido no se completó.")
             return
         if not _routine_sleep_ms(int(params["ms_lm_at_discharge"])):
@@ -2970,8 +3448,11 @@ def _encoder_from_status(replies):
             if not isinstance(block, dict):
                 continue
             item = {}
-            if block.get("mm_off") is not None:
-                item["mm"] = block.get("mm_off")
+            live = block.get("mm_live")
+            if live is None:
+                live = block.get("mm_off")
+            if live is not None:
+                item["mm"] = live
             if "laser" in block:
                 item["laser"] = bool(block.get("laser"))
             if item:
@@ -2981,12 +3462,37 @@ def _encoder_from_status(replies):
 
 @app.route("/api/motion/status", methods=["GET"])
 def motion_status():
-    sent = _send_motion_serial(['{"op":"status"}'])
+    sent = _send_motion_serial(
+        ['{"op":"status"}'],
+        line_timeout_s=2.0,
+        reply_until_op="status",
+        nonblocking=True,
+    )
+    lm_servo_on = None
+    lm_homed = None
+    feeder_ready = {"R": None, "L": None}
+    safety = None
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            status_reply = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if status_reply.get("op") == "status":
+            lm_servo_on = status_reply.get("lm_servo_on")
+            lm_homed = status_reply.get("lm_homed")
+            feeder_ready["R"] = status_reply.get("feeder_r_ready")
+            feeder_ready["L"] = status_reply.get("feeder_l_ready")
+            safety = status_reply.get("safety")
+            break
     return jsonify(
         {
             "ok": True,
             "sent": bool(sent.get("sent")),
             "encoder": _encoder_from_status(sent.get("replies")),
+            "lm_servo_on": lm_servo_on,
+            "lm_homed": lm_homed,
+            "feeder_ready": feeder_ready,
+            "safety": safety,
         }
     )
 
@@ -3005,6 +3511,18 @@ def motion_cmd():
         _deep_merge_motion_tune(tune, patch)
         tune = _canonical_motion_tune(tune)
 
+    if op == "feeder_test":
+        side = str(body.get("side") or "").upper()
+        if side not in ("R", "L"):
+            return jsonify({"ok": False, "error": "El Test pide lado R o L."}), 400
+        try:
+            _save_motion_tune(tune)
+        except OSError:
+            return jsonify({"ok": False, "error": "No se pudo guardar Motion.json"}), 500
+        result = _feeder_test(side, tune)
+        result.update({"op": op, "tune": tune, **_motion_scale()})
+        return jsonify(result)
+
     try:
         tune, lines = _build_motion_lines(op, tune, body)
     except (TypeError, ValueError) as exc:
@@ -3016,13 +3534,37 @@ def motion_cmd():
         except OSError:
             return jsonify({"ok": False, "error": "No se pudo guardar Motion.json"}), 500
 
-    sent = _send_motion_serial(lines)
+    if op == "lmguide_stop":
+        sent = _send_motion_urgent(lines)
+    elif op == "motion_hw_init":
+        sent = _send_motion_serial(
+            lines,
+            line_timeout_s=120.0,
+            reply_until_op="motion_hw_init",
+            nonblocking=True,
+        )
+    else:
+        sent = _send_motion_serial(lines, nonblocking=True)
+    try:
+        response_op = str(json.loads(lines[-1]).get("op") or op)
+    except (IndexError, TypeError, json.JSONDecodeError):
+        response_op = op
+    command_ok = None
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            reply = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if reply.get("op") == response_op:
+            command_ok = bool(reply.get("ok", True))
+            break
     return jsonify(
         {
             "ok": True,
             "op": op,
             "tune": tune,
             "lines": lines,
+            "command_ok": command_ok,
             **_motion_scale(),
             **sent,
         }
@@ -3080,6 +3622,15 @@ def plc_cmd():
         return jsonify({"ok": False, "error": str(exc)}), 400
     packed = _compact(line)
     sent = _send_plc_serial([packed])
+    command_ok = None
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            reply = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if reply.get("op") == op:
+            command_ok = bool(reply.get("ok", True))
+            break
     status = _plc_status_after_command(sent)
     if sent.get("sent") and op in ("valve", "blower_on", "blower_off", "all_off", "reset"):
         status = _plc_wait_ready(2.5) or status
@@ -3088,6 +3639,7 @@ def plc_cmd():
             "ok": True,
             "op": op,
             "lines": [packed],
+            "command_ok": command_ok,
             "status": status,
             "active_errors": _plc_active_errors(status),
             **sent,
@@ -3099,6 +3651,9 @@ def plc_cmd():
 def serial_ports():
     """Puertos COM elegidos en la pantalla."""
     if request.method == "GET":
+        # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (GET: ad, andon_skipped, andon_none_value) ---
+        with _serial_cfg_lock:
+            ad = bool(_serial_cfg.get("andon_disabled"))
         return jsonify(
             {
                 "ok": True,
@@ -3106,6 +3661,9 @@ def serial_ports():
                 "motion": _serial_port("motion"),
                 "plc": _serial_port("plc"),
                 "andon": _serial_port("andon"),
+                "andon_disabled": ad,
+                "andon_skipped": _andon_skipped_effective(),
+                "andon_none_value": _ANDON_NONE_TOKEN,
             }
         )
 
@@ -3116,23 +3674,39 @@ def serial_ports():
     andon_raw = str(body.get("andon") or "").strip()
     motion = _match_listed_port(motion_raw, listed)
     plc = _match_listed_port(plc_raw, listed)
-    andon = _match_listed_port(andon_raw, listed)
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (POST: token __none__ y andon_disable_ui) ---
+    andon_disable_ui = andon_raw == _ANDON_NONE_TOKEN
+    if andon_disable_ui:
+        andon = ""
+    else:
+        andon = _match_listed_port(andon_raw, listed)
     if motion_raw and not motion:
         return jsonify({"ok": False, "error": "El puerto de Motion no está conectado."}), 400
     if plc_raw and not plc:
         return jsonify({"ok": False, "error": "El puerto del PLC no está conectado."}), 400
-    if andon_raw and not andon:
+    if andon_raw and not andon_disable_ui and not andon:
         return jsonify({"ok": False, "error": "El puerto del Andon no está conectado."}), 400
     chosen = [port for port in (motion, plc, andon) if port]
     if len(chosen) != len({port.upper() for port in chosen}):
         return jsonify({"ok": False, "error": "Cada módulo tiene que usar un COM distinto."}), 400
 
     try:
-        _save_serial_cfg(motion, plc, andon)
+        _save_serial_cfg(motion, plc, andon, andon_disable_ui)
     except OSError:
         return jsonify({"ok": False, "error": "No se pudo guardar el puerto."}), 500
 
-    return jsonify({"ok": True, "motion": motion, "plc": plc, "andon": andon})
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (respuesta POST: campos extras) ---
+    return jsonify(
+        {
+            "ok": True,
+            "motion": motion,
+            "plc": plc,
+            "andon": andon,
+            "andon_disabled": andon_disable_ui,
+            "andon_skipped": _andon_skipped_effective(),
+            "andon_none_value": _ANDON_NONE_TOKEN,
+        }
+    )
 
 
 @app.route("/api/serial/test", methods=["POST"])
@@ -3142,6 +3716,17 @@ def serial_module_test():
     which = str(body.get("module") or "").strip().lower()
     if which not in ("motion", "plc", "andon"):
         return jsonify({"ok": False, "error": "Módulo no reconocido."}), 400
+    # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (early return si Andon omitido) ---
+    if which == "andon" and _andon_skipped_effective():
+        return jsonify(
+            {
+                "ok": True,
+                "module": which,
+                "skipped": True,
+                "message": "Andon no usado (Conexión o HMI_ANDON_SKIP=1). No se prueba COM.",
+            }
+        )
+    # ---
     ok, code = _check_module_link(which)
     if not ok:
         return jsonify(
@@ -3216,4 +3801,10 @@ def action():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    # Sin una línea por cada GET de sondeo del HMI (~400–800 ms).
+    app.run(
+        debug=True,
+        host="0.0.0.0",
+        port=5000,
+        request_handler=_QuietRequestHandler,
+    )
