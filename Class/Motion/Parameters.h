@@ -65,6 +65,7 @@ static const float PARAM_ENC_OFFSET_MM        = 0.0f;
 // ── [A] FeedStage (solo firmware) ─────────────────────────────────────────
 
 static const uint32_t PARAM_FEED_STAGE_LASER_TIMEOUT_MS = 4000u;
+static const bool     PARAM_FEED_VALIDATE_ENCODER       = true;
 
 // ── [A] Feeder CAN (CiA402) ────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ struct MotionLMGuideTune {
 struct MotionTune {
   MotionFeederSideTune feeder[MOTION_SIDE_COUNT];
   MotionLMGuideTune lmguide;
+  bool validateEncoder;
 };
 
 // ── [C] set_data / modelo (NVS) ────────────────────────────────────────────
@@ -167,6 +169,7 @@ static inline void motionTuneSetDefaults(MotionTune* tune) {
   }
   tune->lmguide.prSpeedRpm = PARAM_LM_PR_SPEED_RPM;
   tune->lmguide.posPuu = 0;
+  tune->validateEncoder = PARAM_FEED_VALIDATE_ENCODER;
 }
 
 static inline void motionDataSetDefaults(MotionData* data) {

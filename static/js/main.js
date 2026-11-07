@@ -3,6 +3,7 @@
   const STORAGE_THEME = "dmat_theme";
   const STORAGE_MODEL = "dmat_modelo";
   const STORAGE_COMP = "dmat_comp_mm";
+  const LM_PIECE_OFFSET_MM = 55;
 
   const els = {
     statusBanner: document.getElementById("statusBanner"),
@@ -18,7 +19,8 @@
     metricTiempoEstimado: document.getElementById("metricTiempoEstimado"),
     metricTiempoCorriendo: document.getElementById("metricTiempoCorriendo"),
     eventsPanel: document.getElementById("eventsPanel"),
-    eventsList: document.getElementById("eventsList"),
+    eventsLog: document.getElementById("eventsLog"),
+    btnClearEvents: document.getElementById("btnClearEvents"),
     selectMotionPort: document.getElementById("selectMotionPort"),
     selectPlcPort: document.getElementById("selectPlcPort"),
     selectAndonPort: document.getElementById("selectAndonPort"),
@@ -30,6 +32,7 @@
     serialPlcStatus: document.getElementById("serialPlcStatus"),
     serialAndonStatus: document.getElementById("serialAndonStatus"),
     toggleEventsPanel: document.getElementById("toggleEventsPanel"),
+    toggleChecklistBypass: document.getElementById("toggleChecklistBypass"),
     settingsModal: document.getElementById("settingsModal"),
     parametrosModal: document.getElementById("parametrosModal"),
     btnAppSettings: document.getElementById("btnAppSettings"),
@@ -70,6 +73,8 @@
 
   let eventsEnabled = false;
   let pendingEventos = [];
+  let eventsRev = -1;
+  let clearingLog = false;
   let lastProcessAction = null;
   let modelosCatalog = [];
   let syncingModelSelect = false;
@@ -291,7 +296,7 @@
       const len = Number(state.longitud_modelo_mm);
       const offEl = document.querySelector("[data-cycle-param='cut_offset_mm']");
       const off = offEl ? Number(offEl.value) : 0;
-      const cut = len + (Number.isFinite(off) ? off : 0);
+      const cut = len - LM_PIECE_OFFSET_MM + (Number.isFinite(off) ? off : 0);
       els.cycleCutMm.value = Number.isFinite(len) && len > 0 ? cut.toFixed(2) : "";
     }
     setCantidadInput(state.cantidad, !!state.ciclo_en_curso || !!state.charola_llena);
@@ -300,19 +305,15 @@
     els.metricTiempoEstimado.textContent = formatSeconds(state.tiempo_estimado_s);
     els.metricTiempoCorriendo.textContent = formatSeconds(state.tiempo_corriendo_s);
 
-    if (state.eventos && state.eventos.length) {
-      pendingEventos = state.eventos;
-      if (eventsEnabled) renderEvents(pendingEventos);
-      else if (estado === "error" && state.eventos[0]) {
-        setEventsPanelVisible(true);
-        if (els.toggleEventsPanel) els.toggleEventsPanel.checked = true;
-        renderEvents(pendingEventos);
-      }
-    }
+    applyServerEvents(state, estado);
 
-    syncProcessButtons(estado);
+    syncProcessControls(state);
     syncRoutine(state);
-    renderCycleSteps(state.ciclo_paso_id || "", state.ciclo_paso_indice);
+    renderCycleSteps(
+      state.ciclo_paso_id || "",
+      state.ciclo_paso_indice,
+      state.ciclo_paralelo_id || ""
+    );
     setStatePoll(
       estado === "running" ||
         estado === "paused" ||
@@ -321,7 +322,7 @@
     );
   }
 
-  function renderCycleSteps(activeId, activeIndex) {
+  function renderCycleSteps(activeId, activeIndex, parallelId) {
     if (!els.cycleStepsList) return;
     els.cycleStepsList.innerHTML = "";
     const steps = cycleStepsCatalog.length ? cycleStepsCatalog : [];
@@ -331,6 +332,10 @@
       li.dataset.stepId = step.id;
       if (step.id === activeId) {
         li.classList.add("is-active");
+      }
+      if (parallelId && step.id === parallelId) {
+        li.classList.add("is-parallel");
+        li.title = "Siguiente ciclo, en paralelo";
       }
       if (activeIndex != null && idx < activeIndex) {
         li.classList.add("is-done");
@@ -428,33 +433,106 @@
     return document.querySelector('[data-block="proceso"]');
   }
 
-  function syncProcessButtons(estado) {
+  function setToggleLabel(btn, on) {
+    if (!btn) return;
+    if (btn.getAttribute("data-motion-op") === "lmguide_servo") {
+      btn.textContent = on ? "Encendido" : "Apagado";
+      return;
+    }
+    if (btn.hasAttribute("data-plc-op")) {
+      btn.textContent = on ? "Encendido" : "Apagado";
+    }
+  }
+
+  function syncProcessControls(state) {
     const panel = getProcessPanel();
     if (!panel) return;
+
+    const estado = state.estado || "idle";
+    const enCurso = !!state.ciclo_en_curso;
+    const enError = estado === "error" || !!state.ciclo_error;
+    const running = estado === "running";
+    const paused = estado === "paused";
+    const rutina = !!state.rutina;
+    const purga = state.rutina === "purga";
+    const ch = state.checklist || {};
+    const checklistReady = !!ch.ok || !!state.checklist_bypass;
+
+    const sidesEl = document.querySelector("[data-cycle-param='feed_sides']");
+    const sides = sidesEl ? String(sidesEl.value || "").trim().toUpperCase() : "";
+    const piezas = parseInt(String(state.cantidad), 10);
+    const ambos =
+      sides === "LR" || sides === "RL" || sides === "BOTH" || sides === "AMBOS";
+    const cantidadImpar =
+      ambos && (!Number.isFinite(piezas) || piezas < 2 || piezas % 2 !== 0);
+
+    const start = panel.querySelector('[data-action="start"]');
+    const resume = panel.querySelector('[data-action="resume"]');
+    const pause = panel.querySelector('[data-action="pause"]');
+    const stop = panel.querySelector('[data-action="stop"]');
+    const reset = panel.querySelector('[data-action="reset"]');
 
     panel.querySelectorAll("[data-action]").forEach(function (btn) {
       btn.classList.remove("is-active");
       btn.removeAttribute("aria-pressed");
     });
 
-    let activeAction = null;
-    if (estado === "running") {
-      activeAction =
-        lastProcessAction === "resume" ? "resume" : "start";
-    } else if (estado === "paused") {
-      activeAction = "pause";
-    } else if (estado === "error") {
-      activeAction = "reset";
-    } else if (estado === "stopped") {
-      activeAction = "stop";
+    if (start) {
+      start.disabled =
+        !checklistReady ||
+        !!state.carga_material ||
+        purga ||
+        running ||
+        (paused && enCurso) ||
+        cantidadImpar ||
+        enError;
+      if (!checklistReady) {
+        start.title = "Completa la revisión de arranque.";
+      } else if (state.carga_material) {
+        start.title = "Apaga la carga de material.";
+      } else if (purga) {
+        start.title = "Hay una purga en curso.";
+      } else if (cantidadImpar) {
+        start.title =
+          "Con ambos lados la cantidad tiene que ser par y de al menos 2 piezas.";
+      } else if (running) {
+        start.title = "El ciclo ya está en marcha.";
+      } else if (enError) {
+        start.title = "Corrige el error y pulsa Borrar error.";
+      } else {
+        start.title = "";
+      }
+    }
+    if (resume) {
+      resume.disabled =
+        !enCurso || !paused || purga || !!state.carga_material || enError;
+      resume.title = resume.disabled
+        ? paused && !enCurso
+          ? "No hay un ciclo pausado para reanudar."
+          : ""
+        : "Continúa el ciclo desde donde quedó.";
+    }
+    if (pause) {
+      pause.disabled = !running || rutina;
+      pause.title = pause.disabled ? "Solo disponible con el ciclo en marcha." : "";
+    }
+    if (stop) {
+      stop.disabled = !running && !paused && !enCurso && !rutina;
+      stop.title = stop.disabled ? "" : "Detiene de inmediato el ciclo o la rutina.";
+    }
+    if (reset) {
+      reset.disabled = !enError;
+      reset.title = enError
+        ? "Limpia el error cuando la condición ya se corrigió."
+        : "Solo aplica cuando hay un error activo.";
     }
 
-    if (!activeAction) return;
-
-    const activeBtn = panel.querySelector('[data-action="' + activeAction + '"]');
-    if (activeBtn) {
-      activeBtn.classList.add("is-active");
-      activeBtn.setAttribute("aria-pressed", "true");
+    if (enError && reset && !reset.disabled) {
+      reset.classList.add("is-active");
+      reset.setAttribute("aria-pressed", "true");
+    } else if (paused && enCurso && resume && !resume.disabled) {
+      resume.classList.add("is-active");
+      resume.setAttribute("aria-pressed", "true");
     }
   }
 
@@ -489,43 +567,81 @@
     );
   }
 
-  function renderEvents(eventos) {
-    if (!eventsEnabled) return;
-    els.eventsList.innerHTML = "";
-    eventos.slice(0, 20).forEach(function (ev) {
-      const li = document.createElement("li");
-      if (ev.tipo === "error") li.classList.add("event--error");
-      if (ev.tipo === "warn") li.classList.add("event--warn");
-      if (ev.hora) {
-        const t = document.createElement("span");
-        t.className = "event-time";
-        t.textContent = ev.hora;
-        li.appendChild(t);
+  function applyServerEvents(state, estado) {
+    if (!Array.isArray(state.eventos) || clearingLog) return;
+    const rev = Number(state.eventos_rev);
+    const known = Number.isFinite(rev);
+    if (known && rev < eventsRev) return;
+    if (known && rev === eventsRev && !state.eventos.length) return;
+    if (!known && !state.eventos.length) return;
+    if (known) eventsRev = rev;
+    pendingEventos = state.eventos;
+    if (eventsEnabled) renderEvents(pendingEventos);
+    else if (estado === "error" && state.eventos[0]) {
+      setEventsPanelVisible(true);
+      if (els.toggleEventsPanel) els.toggleEventsPanel.checked = true;
+      renderEvents(pendingEventos);
+    }
+  }
+
+  async function clearEventsLog() {
+    if (!els.btnClearEvents || clearingLog) return;
+    clearingLog = true;
+    els.btnClearEvents.disabled = true;
+    pendingEventos = [];
+    if (els.eventsLog) els.eventsLog.value = "";
+    try {
+      const res = await fetch("/api/events/clear", { method: "POST" });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo borrar el registro.");
       }
-      li.appendChild(document.createTextNode(ev.texto || ""));
-      els.eventsList.appendChild(li);
-    });
+      if (Number.isFinite(Number(data.eventos_rev))) eventsRev = Number(data.eventos_rev);
+      pendingEventos = [];
+      if (els.eventsLog) els.eventsLog.value = "";
+    } catch (err) {
+      clearingLog = false;
+      pushLocalEvent(err.message || "No se pudo borrar el registro.", "error");
+    } finally {
+      clearingLog = false;
+      if (els.btnClearEvents) els.btnClearEvents.disabled = false;
+    }
+  }
+
+  function formatEventLine(ev) {
+    const mark = ev.tipo === "error" ? "ERROR  " : ev.tipo === "warn" ? "AVISO  " : "";
+    const text = mark + (ev.texto || "");
+    return ev.hora ? ev.hora + "  " + text : text;
+  }
+
+  function renderEvents(eventos) {
+    if (!eventsEnabled || !els.eventsLog) return;
+    const next = (eventos || []).slice().reverse().map(formatEventLine).join("\n");
+    const box = els.eventsLog;
+    if (box.value === next) return;
+    const prev = box.value;
+    const grewAtEnd = next.startsWith(prev);
+    const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+    const start = box.selectionStart;
+    const end = box.selectionEnd;
+    const selecting = document.activeElement === box && start !== end;
+    const scrollTop = box.scrollTop;
+    box.value = next;
+    if (selecting && grewAtEnd) {
+      box.setSelectionRange(start, end);
+      box.scrollTop = scrollTop;
+    } else if (stick) {
+      box.scrollTop = box.scrollHeight;
+    } else {
+      box.scrollTop = scrollTop;
+    }
   }
 
   function pushLocalEvent(texto, tipo) {
     const entry = { texto: texto, tipo: tipo || "info", hora: formatTime(new Date()) };
     pendingEventos.unshift(entry);
-    pendingEventos = pendingEventos.slice(0, 50);
-
-    if (!eventsEnabled) return;
-
-    const li = document.createElement("li");
-    if (tipo === "error") li.classList.add("event--error");
-    if (tipo === "warn") li.classList.add("event--warn");
-    const t = document.createElement("span");
-    t.className = "event-time";
-    t.textContent = entry.hora;
-    li.appendChild(t);
-    li.appendChild(document.createTextNode(texto));
-    els.eventsList.insertBefore(li, els.eventsList.firstChild);
-    while (els.eventsList.children.length > 25) {
-      els.eventsList.removeChild(els.eventsList.lastChild);
-    }
+    pendingEventos = pendingEventos.slice(0, 300);
+    renderEvents(pendingEventos);
   }
 
   function syncModelSelect(modeloId) {
@@ -676,6 +792,10 @@
       const path = input.getAttribute("data-motion-path");
       const val = getByPath(tune, path);
       if (val == null) return;
+      if (input.type === "checkbox") {
+        input.checked = !!val;
+        return;
+      }
       const unit = input.getAttribute("data-motion-unit");
       if (unit === "mm") {
         input.value = motionFormatMm(val);
@@ -698,6 +818,10 @@
     if (!els.motionTuneForm) return tune;
     els.motionTuneForm.querySelectorAll("[data-motion-path]").forEach(function (input) {
       const path = input.getAttribute("data-motion-path");
+      if (input.type === "checkbox") {
+        setByPath(tune, path, input.checked);
+        return;
+      }
       const raw = input.value.trim();
       if (raw === "") return;
       let num = Number(raw);
@@ -756,6 +880,7 @@
     if (!btn) return;
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.classList.toggle("is-active", !!on);
+    setToggleLabel(btn, on);
   }
 
   async function sendMotionOp(op, extra) {
@@ -787,17 +912,14 @@
       }
       motionApplyScale(data);
       if (data.tune) motionFormFromTune(data.tune);
-      const lines = (data.lines || []).join("\n");
-      const reply = (data.replies || []).filter(Boolean).join(" | ");
-      let hint = lines;
       if (data.sent) {
-        hint += reply ? "\nESP32: " + reply : "\nEnviado al ESP32.";
-        pushLocalEvent("Motion enviado: " + op);
+        pushLocalEvent("Motion: orden enviada.");
+        setMotionHint("Listo.");
       } else {
-        hint += "\n" + (data.reason || "No se envió al puerto.");
-        pushLocalEvent("Motion armado, sin puerto: " + op);
+        const reason = data.reason || "No se envió al puerto.";
+        pushLocalEvent(reason, "error");
+        setMotionHint(reason);
       }
-      setMotionHint(hint);
       return data;
     } catch (err) {
       pushLocalEvent("Error al enviar la orden Motion.", "error");
@@ -951,11 +1073,11 @@
 
   function labelForAction(action) {
     const labels = {
-      start: "Start",
+      start: "Iniciar",
       resume: "Reanudar",
       pause: "Pausa",
       stop: "Stop",
-      reset: "Reset",
+      reset: "Borrar error",
       parametros: "Parámetros",
       mantenimiento: "Mantenimiento",
       checklist: "Checklist",
@@ -985,8 +1107,12 @@
       });
       const data = await res.json();
       if (!data.ok) {
-        pushLocalEvent(data.error || "Error al registrar acción.", "error");
+        const errorText = data.error || "Error al registrar acción.";
+        pushLocalEvent(errorText, "error");
         if (data.state) applyState(data.state);
+        if (els.statusBannerDetail && els.statusBannerDetail.textContent !== errorText) {
+          els.statusBannerDetail.textContent = errorText;
+        }
         return;
       }
       pushLocalEvent("[" + block + "] " + labelForAction(action));
@@ -1172,9 +1298,41 @@
     }
   }
 
+  async function loadChecklistBypass() {
+    if (!els.toggleChecklistBypass) return;
+    try {
+      const res = await fetch("/api/settings/checklist-bypass");
+      const data = await res.json();
+      if (data.ok) els.toggleChecklistBypass.checked = data.enabled === true;
+    } catch (err) {
+      pushLocalEvent("No se pudo leer el bypass del checklist.", "error");
+    }
+  }
+
+  async function saveChecklistBypass() {
+    if (!els.toggleChecklistBypass) return;
+    const enabled = els.toggleChecklistBypass.checked;
+    try {
+      const res = await fetch("/api/settings/checklist-bypass", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: enabled }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "No se pudo guardar.");
+      els.toggleChecklistBypass.checked = data.enabled === true;
+      pushLocalEvent(data.enabled ? "Bypass de checklist activo." : "Checklist obligatorio.");
+      await fetchState();
+    } catch (err) {
+      els.toggleChecklistBypass.checked = !enabled;
+      pushLocalEvent(err.message || "No se pudo guardar el bypass del checklist.", "error");
+    }
+  }
+
   function openSettings() {
     els.parametrosModal.hidden = true;
     els.settingsModal.hidden = false;
+    loadChecklistBypass();
     els.settingsModalClose.focus();
   }
 
@@ -1315,9 +1473,14 @@
     });
   }
 
+  if (els.btnClearEvents) els.btnClearEvents.addEventListener("click", clearEventsLog);
+
   els.toggleEventsPanel.addEventListener("change", function () {
     setEventsPanelVisible(els.toggleEventsPanel.checked);
   });
+  if (els.toggleChecklistBypass) {
+    els.toggleChecklistBypass.addEventListener("change", saveChecklistBypass);
+  }
 
   els.settingsTabs.forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -1361,6 +1524,7 @@
     btn.setAttribute("aria-pressed", on ? "true" : "false");
     btn.classList.toggle("is-active", !!on);
     if (!on) btn.classList.remove("is-vivid");
+    setToggleLabel(btn, on);
   }
 
   function setPlcHint(text) {
@@ -1417,17 +1581,14 @@
         pushLocalEvent("El MCU PLC no confirmó la orden: " + op, "error");
         return null;
       }
-      const lines = (data.lines || []).join("\n");
-      const reply = (data.replies || []).filter(Boolean).join(" | ");
-      let hint = lines;
       if (data.sent) {
-        hint += reply ? "\nESP32: " + reply : "\nEnviado al ESP32.";
-        pushLocalEvent("PLC enviado: " + op);
+        pushLocalEvent("PLC: orden enviada.");
+        setPlcHint("Listo.");
       } else {
-        hint += "\n" + (data.reason || "No se envió al puerto.");
-        pushLocalEvent("PLC armado, sin puerto: " + op);
+        const reason = data.reason || "No se envió al puerto.";
+        pushLocalEvent(reason, "error");
+        setPlcHint(reason);
       }
-      setPlcHint(hint);
       if (data.status) applyPlcStatus(data.status);
       if (data.active_errors && data.active_errors.length) {
         data.active_errors.forEach(function (err) {
@@ -1493,6 +1654,7 @@
     }
     if (!on) return;
     pollPlc();
+    plcPollTimer = window.setInterval(pollPlc, 400);
   }
 
   if (els.plcManualForm) {
@@ -1559,26 +1721,18 @@
   function syncRoutine(state) {
     const rutina = state.rutina || "";
     const fase = state.rutina_fase || "";
-    const ch = state.checklist || {};
     const purga = rutina === "purga";
-    const start = actionButton("start");
-    if (start) {
-      start.disabled = !ch.ok || !!state.carga_material || purga;
-      if (!ch.ok) start.title = "Completa la revisión de arranque.";
-      else if (state.carga_material) start.title = "Apaga la carga de material.";
-      else if (purga) start.title = "Hay una purga en curso.";
-      else start.title = "";
+    const cicloCorriendo = state.estado === "running";
+    const purgaBtn = actionButton("purga");
+    if (purgaBtn) {
+      purgaBtn.disabled = cicloCorriendo || (!!rutina && !purga);
+      setButtonOn(purgaBtn, purga);
     }
-    const resume = actionButton("resume");
-    if (resume) resume.disabled = purga || !!state.carga_material;
-    const pause = actionButton("pause");
-    if (pause) pause.disabled = !!rutina;
     const home = actionButton("posicion_inicial");
     if (home) {
-      home.disabled = !!state.rutina_manos;
+      home.disabled = !!state.rutina_manos || cicloCorriendo || (!!rutina && rutina !== "purga");
       setButtonOn(home, rutina === "posicion_inicial");
     }
-    setButtonOn(actionButton("purga"), purga);
     const carga = actionButton("carga_material");
     if (carga) {
       carga.disabled = purga;
@@ -1625,6 +1779,7 @@
     const ch = state.checklist || {};
     const key = [
       ch.ok,
+      state.checklist_bypass,
       ch.paso,
       ch.empleado,
       ch.eje_ok,
@@ -1652,10 +1807,12 @@
     const actions = document.createElement("div");
     actions.className = "checklist-actions";
 
-    if (ch.ok) {
-      hint.textContent = ch.empleado
-        ? "Revisión completa. Empleado " + ch.empleado + "."
-        : "Este arranque no exige revisión. Puedes hacerla ahora.";
+    if (ch.ok || state.checklist_bypass) {
+      hint.textContent = state.checklist_bypass
+        ? "El bypass está activo. El ciclo puede iniciar sin completar esta revisión."
+        : ch.empleado
+          ? "Revisión completa. Empleado " + ch.empleado + "."
+          : "Este arranque no exige revisión. Puedes hacerla ahora.";
       actions.appendChild(checkButton("Nueva revisión", "checklist_nueva", !!state.rutina));
       body.appendChild(hint);
       body.appendChild(liveLine);
@@ -1705,7 +1862,7 @@
       actions.appendChild(checkButton("Hacer purga", "checklist_purga", !ch.alimentador_ok || !!state.rutina));
       actions.appendChild(checkButton("Purga lista", "checklist_purga_hecha", !ch.purga_ok));
     } else {
-      hint.textContent = "Paso 6 de 6. Corta dos piezas del modelo cargado. La longitud esperada es la del modelo más 55 mm, dentro de la tolerancia del ciclo.";
+      hint.textContent = "Paso 6 de 6. Corta dos piezas del modelo cargado. Cada lado debe medir la longitud del modelo, dentro de la tolerancia del ciclo. La LM Guide recorre esa longitud menos 55 mm.";
       if (!ch.piezas_cortadas) {
         actions.appendChild(checkButton("Cortar 2 piezas", "checklist_piezas", !!state.rutina));
       } else {

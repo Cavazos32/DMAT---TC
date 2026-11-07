@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 from flask import Flask, jsonify, render_template, request
 from werkzeug.serving import WSGIRequestHandler
@@ -42,9 +43,11 @@ CHECKLIST_LOG_PATH = DATA_DIR / "checklist.json"
 
 # Vías de operador. No son parámetros del ciclo automático.
 PURGE_PARK_MM = 250.0
+PURGE_DEPOSIT_MM = 100.0
 PURGE_CLEAN_MS = 3000
 PURGE_AFTER_CUT_MS = 500
-CHECKLIST_EXTRA_MM = 55.0
+# La longitud del modelo es la pieza. La LM Guide recorre esa longitud menos este offset.
+LMGUIDE_PIECE_OFFSET_MM = 55.0
 CHECKLIST_MAX_CYCLES = 10000
 
 # ServoLMGuide.h [7]: 770 PUU en 45 mm. El sentido de trabajo es PUU negativo.
@@ -78,6 +81,7 @@ _serial_cfg = {
     "plc": "",
     "andon": "",
     "andon_disabled": False,  # ANDON_SKIP_OPCIONAL — TODO_BORRAR (quitar clave y usos)
+    "checklist_bypass": False,
 }
 
 # Orquestador del ciclo automático (rules.md §4.1–4.8) — app.py coordina Motion + PLC.
@@ -124,8 +128,31 @@ _LOT = {
     "sides": "R",
 }
 _LAST_PIECE_S = 0.0
+# Longitud ya medida de la pieza que se está cortando. El soplo la usa
+# aunque el paso 3 del ciclo siguiente termine durante el regreso a home.
+_PIECE_BLOWER_MM = None
+
+# Siguiente ciclo arrancado al soltar pinzas (paso 7).
+# Los pasos 1 a 3 pueden terminar mientras el eje sigue hacia home.
+# El paso 4 no cierra pinzas hasta que el paso 8 anterior acabó:
+# eje en home y pinzas abiertas.
+_OVERLAP = {
+    "gen": 0,
+    "on": False,
+    "feed_sent": False,
+    "feed_done": False,
+    "holder_error": "",
+    "holder_ready": threading.Event(),
+    "feed": None,
+    "blower_mm": None,
+    "t0": None,
+    "feed_error": False,
+}
+# El siguiente paso 4 solo cierra: home ya está hecho y las pinzas siguen abiertas.
+_STEP4_CLOSES = False
 
 # Pasos ejecutables en orden (1 = arranque / set_data al Motion).
+# Con otro ciclo pendiente, el paso 7 dispara de nuevo el 1 sin esperar al 8.
 CYCLE_STEPS = (
     {"id": "1", "label": "Start — inicio de secuencia", "actor": "coordinator"},
     {"id": "2", "label": "Holder dual + encoder dual", "actor": "plc"},
@@ -166,6 +193,7 @@ _MACHINE_STATE = {
     "ciclo_paso_id": "",
     "ciclo_paso_label": "",
     "ciclo_paso_indice": 0,
+    "ciclo_paralelo_id": "",
     "ciclo_en_curso": False,
     "ciclo_error": "",
     "ciclo_feed": {"R": None, "L": None},
@@ -228,6 +256,15 @@ def _clamp_lm_pr_speed_rpm(value) -> float:
     return max(LMGUIDE_PR_RPM_MIN, min(LMGUIDE_PR_RPM_MAX, x))
 
 
+def _as_bool(src, path, default=False) -> bool:
+    value = _dig(src, path, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "on", "yes")
+    return bool(value)
+
+
 def _canonical_motion_tune(src):
     """Parámetros persistidos en Motion.json. Defaults alineados con Parameters.h."""
     src = src if isinstance(src, dict) else {}
@@ -247,6 +284,9 @@ def _canonical_motion_tune(src):
         "lmguide": {
             "pr_speed_rpm": _clamp_lm_pr_speed_rpm(_as_float(src, ("lmguide", "pr_speed_rpm"), 1200.0)),
             "pos_puu": _as_int(src, ("lmguide", "pos_puu"), 0),
+        },
+        "feed_stage": {
+            "validate_encoder": _as_bool(src, ("feed_stage", "validate_encoder"), True),
         },
     }
 
@@ -291,6 +331,7 @@ def _motion_tune_flat(tune: dict) -> dict:
         "feed_l_comp_mm": feed["L"]["compensation_mm"],
         "lm_pr_speed_rpm": lm["pr_speed_rpm"],
         "lm_pos_puu": lm["pos_puu"],
+        "feed_validate_encoder": tune["feed_stage"]["validate_encoder"],
     }
 
 
@@ -319,7 +360,8 @@ def _feed_sides_of(params: dict) -> str:
 
 
 def _cut_mm_of(length: float, params: dict) -> float:
-    return abs(length) + _num(params.get("cut_offset_mm"), 0.0)
+    """Corte de la LM Guide: largo de pieza − 55 mm + offset."""
+    return abs(length) - LMGUIDE_PIECE_OFFSET_MM + _num(params.get("cut_offset_mm"), 0.0)
 
 
 def _clear_of(deposit: float, clearance: float) -> float:
@@ -436,7 +478,7 @@ def _active_cut_deposit():
 
 
 def _lm_cut_and_discharge(params: dict) -> tuple[float, float] | None:
-    """Corte = |L| + offset. Descarga = depósito del primer montón."""
+    """Corte = |L| − 55 mm + offset. Descarga = depósito del primer montón."""
     length = _target_length_mm()
     if length <= 0:
         return None
@@ -567,6 +609,7 @@ def _load_serial_cfg() -> None:
     andon = os.environ.get("ANDON_SERIAL", "").strip()
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR ---
     andon_disabled = False
+    checklist_bypass = False
     if SERIAL_PATH.exists():
         try:
             saved = json.loads(SERIAL_PATH.read_text(encoding="utf-8"))
@@ -577,6 +620,7 @@ def _load_serial_cfg() -> None:
             plc = str(saved.get("plc") or "").strip()
             andon = str(saved.get("andon") or "").strip()
             andon_disabled = bool(saved.get("andon_disabled"))
+            checklist_bypass = bool(saved.get("checklist_bypass"))
     if andon_disabled:
         andon = ""
     with _serial_cfg_lock:
@@ -584,6 +628,7 @@ def _load_serial_cfg() -> None:
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
         _serial_cfg["andon_disabled"] = andon_disabled
+        _serial_cfg["checklist_bypass"] = checklist_bypass
     # --- fin ANDON_SKIP_OPCIONAL (_load_serial_cfg) ---
 
 
@@ -592,6 +637,11 @@ def _andon_skipped_effective() -> bool:
     with _serial_cfg_lock:
         disabled = bool(_serial_cfg.get("andon_disabled"))
     return _ANDON_SKIPPED_ENV or disabled
+
+
+def _checklist_bypassed() -> bool:
+    with _serial_cfg_lock:
+        return bool(_serial_cfg.get("checklist_bypass"))
 
 
 def _serial_port(which: str) -> str:
@@ -659,7 +709,13 @@ def _match_listed_port(value: str, ports: list[dict]) -> str:
     return ""
 
 
-def _save_serial_cfg(motion: str, plc: str, andon: str, andon_disabled: bool) -> None:
+def _save_serial_cfg(
+    motion: str,
+    plc: str,
+    andon: str,
+    andon_disabled: bool,
+    checklist_bypass: bool,
+) -> None:
     """Guarda serial.json. Parámetro andon_disabled: ANDON_SKIP_OPCIONAL — TODO_BORRAR."""
     motion = str(motion or "").strip()
     plc = str(plc or "").strip()
@@ -677,11 +733,18 @@ def _save_serial_cfg(motion: str, plc: str, andon: str, andon_disabled: bool) ->
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
         _serial_cfg["andon_disabled"] = bool(andon_disabled)
+        _serial_cfg["checklist_bypass"] = bool(checklist_bypass)
     SERIAL_PATH.parent.mkdir(parents=True, exist_ok=True)
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR: quitar clave andon_disabled del JSON ---
     SERIAL_PATH.write_text(
         json.dumps(
-            {"motion": motion, "plc": plc, "andon": andon, "andon_disabled": bool(andon_disabled)},
+            {
+                "motion": motion,
+                "plc": plc,
+                "andon": andon,
+                "andon_disabled": bool(andon_disabled),
+                "checklist_bypass": bool(checklist_bypass),
+            },
             indent=2,
         )
         + "\n",
@@ -737,15 +800,42 @@ def _read_lines_until_op(
     budget_s: float,
     max_lines: int = 800,
     trace_prefix: str | None = None,
+    inject=None,
+    on_line=None,
 ) -> list[str]:
-    """Lee líneas completas hasta la respuesta pedida, conservando las intermedias."""
+    """Lee líneas completas hasta la respuesta pedida, conservando las intermedias.
+
+    inject() corre con el candado de escritura: None sigue esperando, [] no
+    escribe, una lista se manda una sola vez. Si esa lista salió, también se
+    espera su feed_stage: el regreso a home puede contestar antes o después.
+    """
     out: list[str] = []
+    seen: set[str] = set()
+    injected = False
+    wait_also = None
     deadline = time.time() + max(0.05, budget_s)
     while time.time() < deadline and len(out) < max_lines:
+        if inject is not None and _cycle_should_stop():
+            break
+        if inject is not None and not injected:
+            with _motion_write_lock:
+                extra = inject()
+                if extra is not None:
+                    injected = True
+                    if extra:
+                        wait_also = "feed_stage"
+                        for line in extra:
+                            print(f"[Motion TX] {line}", flush=True)
+                            ser.write((line + "\n").encode("ascii", "replace"))
+                        ser.flush()
+            if injected and extra:
+                for line in extra:
+                    _push_event(f"[Motion] {line}")
         rem = deadline - time.time()
         if rem <= 0:
             break
-        line = _read_serial_line(ser, min(2.0, rem))
+        slice_s = 0.15 if (inject is not None and not injected) else min(2.0, rem)
+        line = _read_serial_line(ser, min(slice_s, rem))
         if not line:
             time.sleep(0.02)
             continue
@@ -756,7 +846,12 @@ def _read_lines_until_op(
             msg = json.loads(line)
         except (TypeError, json.JSONDecodeError):
             continue
-        if msg.get("op") == want_op:
+        op = msg.get("op")
+        if op:
+            seen.add(op)
+            if on_line is not None:
+                on_line(msg)
+        if want_op in seen and (wait_also is None or wait_also in seen):
             break
     return out
 
@@ -768,6 +863,16 @@ _andon_serial_lock = threading.Lock()
 _andon_state_sent = ""
 _andon_attempted = ""
 _PLC_VALVES = ("holder", "encoder", "cutter_r", "cutter_l", "gripper")
+# Estado lógico reportado por el MCU (gLogical) tras cada pulso KEEP/RES.
+_PLC_VALVE_STATUS_KEYS = {
+    "holder": ("holder",),
+    "encoder": ("encoder",),
+    "cutter_r": ("cutter_r",),
+    "cutter_l": ("cutter_l",),
+    "gripper": ("gripper",),
+    "holder_encoder": ("holder", "encoder"),
+    "cutters": ("cutter_r", "cutter_l"),
+}
 _load_serial_cfg()
 
 
@@ -1032,7 +1137,8 @@ def _plc_wait_ready(timeout_s: float = 3.0) -> dict | None:
     deadline = time.time() + timeout_s
     last = None
     while time.time() < deadline:
-        if _cycle_should_stop():
+        # Un Stop de una rutina deja el flag del ciclo puesto. No es falta de status.
+        if _cycle_should_stop() and _cycle_thread_alive():
             return last
         last = _plc_status_get()
         if last is not None and not last.get("pulse_busy"):
@@ -1041,6 +1147,64 @@ def _plc_wait_ready(timeout_s: float = 3.0) -> dict | None:
     if last is not None and last.get("pulse_busy"):
         return last
     return last
+
+
+def _plc_status_valve_matches(st: dict | None, name: str, want_on: bool) -> bool:
+    """True si el status del MCU ya refleja el estado pedido (válvulas KEEP/RES)."""
+    keys = _PLC_VALVE_STATUS_KEYS.get(name)
+    if not st or not keys:
+        return False
+    for key in keys:
+        if st.get(key) is not want_on:
+            return False
+    return True
+
+
+def _plc_valve_skip_pulse(name: str, want_on: bool) -> bool:
+    """No enviar pulso si la válvula ya está en ese estado (evita toggle accidental)."""
+    if not _serial_port("plc"):
+        return False
+    st = _plc_wait_ready(1.5)
+    if st is None or st.get("pulse_busy"):
+        return False
+    return _plc_status_valve_matches(st, name, want_on)
+
+
+def _plc_send_payload(payload: dict, *, push_log: bool = False) -> dict:
+    """Envía una orden al MCU PLC; en válvulas omite el pulso si ya está en el estado."""
+    op = str(payload.get("op") or "")
+    name = str(payload.get("name") or "")
+    want_on = bool(payload.get("on"))
+    if op == "valve" and name and _plc_valve_skip_pulse(name, want_on):
+        try:
+            line = _compact(_build_plc_line(op, payload))
+        except (TypeError, ValueError):
+            line = _compact(payload)
+        sent = {
+            "sent": True,
+            "skipped": True,
+            "replies": [_compact({"op": "valve", "ok": True})],
+            "last_payload": payload,
+        }
+        if push_log:
+            _push_event(f"[PLC] {line} (sin pulso, ya en estado)")
+        return sent
+    try:
+        if op in ("valve", "blower_on", "blower_off", "all_off", "reset"):
+            line = _compact(_build_plc_line(op, payload))
+        else:
+            line = _compact(payload)
+    except (TypeError, ValueError):
+        line = _compact(payload)
+    sent = _send_plc_serial([line])
+    sent["last_payload"] = payload
+    if not sent.get("sent"):
+        sent["code"] = "E019" if _serial_port("plc") else "E017"
+        if push_log:
+            _push_event(error_codes.format_message(sent["code"]), "error")
+    elif push_log:
+        _push_event(f"[PLC] {line}")
+    return sent
 
 
 def _plc_verify_logical(st: dict, expected: dict) -> tuple[bool, str | None]:
@@ -1062,6 +1226,8 @@ def _plc_confirm(expected: dict, timeout_s: float = 3.0) -> tuple[bool, str | No
         return False, "E017"
     st = _plc_wait_ready(timeout_s)
     if st is None:
+        if _cycle_should_stop() and _cycle_thread_alive():
+            return False, ""
         return False, "E010"
     if st.get("pulse_busy"):
         return False, "E016"
@@ -1085,6 +1251,8 @@ def _send_motion_serial(
     line_timeout_s=None,
     reply_until_op: str | None = None,
     nonblocking: bool = False,
+    inject=None,
+    on_line=None,
 ):
     port = _serial_port("motion")
     if not port:
@@ -1151,6 +1319,8 @@ def _send_motion_serial(
                         expected_op,
                         wait_s,
                         trace_prefix="[Motion RX]" if trace_motion else None,
+                        inject=inject if index == len(lines) - 1 else None,
+                        on_line=on_line if index == len(lines) - 1 else None,
                     )
                 )
             else:
@@ -1254,12 +1424,25 @@ def _now_hms() -> str:
     return time.strftime("%H:%M:%S")
 
 
+_EVENTS_REV = 0
+
+
 def _push_event(texto: str, tipo: str = "info") -> None:
+    global _EVENTS_REV
     entry = {"texto": texto, "tipo": tipo, "hora": _now_hms()}
     with _STATE_LOCK:
         ev = _MACHINE_STATE.setdefault("eventos", [])
         ev.insert(0, entry)
-        del ev[20:]
+        del ev[300:]
+        _EVENTS_REV += 1
+
+
+def _clear_event_log() -> int:
+    global _EVENTS_REV
+    with _STATE_LOCK:
+        _MACHINE_STATE["eventos"] = []
+        _EVENTS_REV += 1
+        return _EVENTS_REV
 
 
 def _andon_desired(machine: dict) -> str:
@@ -1315,7 +1498,9 @@ def _public_machine_state() -> dict:
     with _STATE_LOCK:
         state = dict(_MACHINE_STATE)
         state["checklist"] = dict(_MACHINE_STATE.get("checklist") or {})
+        state["checklist_bypass"] = _checklist_bypassed()
         state["eventos"] = list(_MACHINE_STATE.get("eventos") or [])
+        state["eventos_rev"] = _EVENTS_REV
         state["ciclo_feed"] = dict(_MACHINE_STATE.get("ciclo_feed") or {})
         state["charola_llena"] = bool(_LOT["tray_wait"])
         state["charola_ciclos"] = int(_LOT["deposits_per_tray"] or 0) if _LOT["tray_wait"] else 0
@@ -1332,6 +1517,7 @@ def _set_machine_ui(
     mensaje=None,
     step_id=None,
     step_index=None,
+    paralelo_id=None,
     en_curso=None,
     ciclo_error=None,
     progreso_pct=None,
@@ -1354,6 +1540,8 @@ def _set_machine_ui(
             _MACHINE_STATE["ciclo_paso_indice"] = step_index
             if progreso_pct is None:
                 _MACHINE_STATE["progreso_pct"] = _cycle_progress_pct(step_index)
+        if paralelo_id is not None:
+            _MACHINE_STATE["ciclo_paralelo_id"] = paralelo_id
         if progreso_pct is not None:
             _MACHINE_STATE["progreso_pct"] = progreso_pct
         if en_curso is not None:
@@ -1371,6 +1559,11 @@ def _set_machine_ui(
 
 def _cycle_should_stop() -> bool:
     return _CYCLE_CTRL["stop"].is_set()
+
+
+def _cycle_thread_alive() -> bool:
+    thread = _CYCLE_CTRL["thread"]
+    return thread is not None and thread.is_alive()
 
 
 def _motion_owner_busy() -> str:
@@ -1399,27 +1592,14 @@ def _cycle_sleep_ms(ms: int) -> bool:
 
 
 def _cycle_plc_send(payload: dict):
-    op = str(payload.get("op") or "")
-    try:
-        if op in ("valve", "blower_on", "blower_off", "all_off", "reset"):
-            line = _compact(_build_plc_line(op, payload))
-        else:
-            line = _compact(payload)
-    except (TypeError, ValueError):
-        line = _compact(payload)
-    sent = _send_plc_serial([line])
-    sent["last_payload"] = payload
-    if not sent.get("sent"):
-        sent["code"] = "E019" if _serial_port("plc") else "E017"
-        _push_event(error_codes.format_message(sent["code"]), "error")
-    else:
-        _push_event(f"[PLC] {line}")
-    return sent
+    return _plc_send_payload(payload, push_log=True)
 
 
-def _cycle_motion_send(payload: dict, timeout_s: float = 2.0):
+def _cycle_motion_send(payload: dict, timeout_s: float = 2.0, inject=None, on_line=None):
     line = _compact(payload)
-    sent = _send_motion_serial([line], line_timeout_s=timeout_s)
+    sent = _send_motion_serial(
+        [line], line_timeout_s=timeout_s, inject=inject, on_line=on_line
+    )
     sent["last_payload"] = payload
     if sent.get("sent"):
         _push_event(f"[Motion] {line}")
@@ -1474,8 +1654,10 @@ def _motion_ready_for_cycle() -> tuple[bool, str]:
         return False, error_codes.format_message("E039")
     if status.get("feeder_r_ready") is not True or status.get("feeder_l_ready") is not True:
         return False, error_codes.format_message("E032")
-    if status.get("lm_servo_on") is not True or status.get("lm_homed") is not True:
-        return False, error_codes.format_message("E044")
+    # lm_servo_on es el último On enviado por la HMI, no el estado del drive.
+    # Un home válido ya demuestra que el servo ejecutó el movimiento a cero.
+    if status.get("lm_homed") is not True:
+        return False, "LM Guide sin home. Llévalo a cero antes de Start."
     return True, ""
 
 
@@ -1512,8 +1694,38 @@ def _sent_ok(sent: dict, fallback: str) -> bool:
     return False
 
 
+def _feed_dict_length_mm(feed: dict | None) -> Optional[float]:
+    """Promedio de mm leídos en alimentación (L/R); None si aún no hay medición."""
+    feed = feed or {}
+    mm_vals = []
+    for side in ("R", "L"):
+        block = feed.get(side)
+        if not isinstance(block, dict):
+            continue
+        raw = block.get("mm")
+        if raw is None:
+            continue
+        try:
+            mm_vals.append(abs(float(raw)))
+        except (TypeError, ValueError):
+            continue
+    if not mm_vals:
+        return None
+    return sum(mm_vals) / len(mm_vals)
+
+
+def _measured_feed_length_mm() -> Optional[float]:
+    return _feed_dict_length_mm(_MACHINE_STATE.get("ciclo_feed") or {})
+
+
 def _cycle_blower_duration_ms(params: dict) -> int:
-    length = _MOTION_DATA.get("target_length_mm")
+    # Duración del pulso: proporcional a la longitud de pieza. Preferir medición real
+    # del paso de alimentación; si no hay datos, usar la longitud objetivo del modelo.
+    length = _PIECE_BLOWER_MM
+    if length is None or length <= 0:
+        length = _measured_feed_length_mm()
+    if length is None or length <= 0:
+        length = _MOTION_DATA.get("target_length_mm")
     try:
         length_f = float(length) if length is not None else 0.0
     except (TypeError, ValueError):
@@ -1537,6 +1749,16 @@ def _cycle_enter_step(step_id: str, step_index: int) -> None:
     }
     estado, elabel, msg = labels.get(step_id, ("running", "Ciclo en marcha", step_id))
     msg = _cycle_piece_prefix() + msg
+    global _STEP4_CLOSES
+    if step_id == "4" and _STEP4_CLOSES:
+        _STEP4_CLOSES = False
+        msg = _cycle_piece_prefix() + "Home con pinzas abiertas. Cierra pinzas y sigue."
+    elif step_id == "8" and _OVERLAP["feed_done"] and _LOT["active"]:
+        msg = _cycle_piece_prefix() + "Pasos 1 a 3 listos. Esperando home con pinzas abiertas para cerrar."
+    if step_id == "8" and _OVERLAP["on"] and not _OVERLAP["feed_done"] and _LOT["active"]:
+        nxt = int(_LOT["cycles_done"]) + 2
+        total = int(_LOT["cycles_total"])
+        msg = msg + f" Ciclo {nxt} de {total} alimenta en paralelo."
     _set_machine_ui(
         estado=estado,
         estado_label=elabel,
@@ -1599,7 +1821,8 @@ def _cycle_assert_preconditions(step_index: int) -> bool:
             return False
         ok_hw, code = _plc_confirm({"holder": True, "encoder": True})
         if not ok_hw:
-            _cycle_fail(code or "E010")
+            if code:
+                _cycle_fail(code)
             return False
 
     if step_id == "4":
@@ -1618,7 +1841,8 @@ def _cycle_assert_preconditions(step_index: int) -> bool:
             {"gripper": True, "holder": False, "encoder": False}
         )
         if not ok_hw:
-            _cycle_fail(code or "E010")
+            if code:
+                _cycle_fail(code)
             return False
 
     if step_id == "6":
@@ -1681,7 +1905,7 @@ def _fail_feed_stage(error_name: str) -> None:
         _cycle_fail(code)
 
 
-def _cycle_move_lm_mm(mm: float) -> bool:
+def _cycle_move_lm_mm(mm: float, inject=None, on_line=None) -> bool:
     tune = _load_motion_tune()
     puu = _mm_to_puu(mm)
     return _motion_cmd_serial_ok(
@@ -1692,6 +1916,8 @@ def _cycle_move_lm_mm(mm: float) -> bool:
                 "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
             },
             timeout_s=90.0,
+            inject=inject,
+            on_line=on_line,
         ),
         "E043",
     )
@@ -1711,16 +1937,17 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         ok_hw, code = _plc_confirm({"holder": True, "encoder": True})
         if not ok_hw:
-            _cycle_fail(code or "E010")
+            if code:
+                _cycle_fail(code)
             return False
         return True
 
     # Step 3. Alimentar el lado configurado hasta el láser y validar el encoder.
     if step_id == "3":
         sides = _run_sides()
-        payload = {"op": "feed_stage"}
-        if sides in ("R", "L"):
-            payload["side"] = sides
+        if not _motion_cmd_serial_ok(_push_saved_motion_tune(), "E043"):
+            return False
+        payload = _feed_stage_payload(sides if sides in ("R", "L") else None)
         side_name = {"R": "derecho", "L": "izquierdo", "LR": "L y R"}[sides]
         _set_machine_ui(mensaje=_cycle_piece_prefix() + f"Alimentación {side_name}.")
         sent = _cycle_motion_send(payload, timeout_s=65.0)
@@ -1732,6 +1959,8 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             _fail_feed_stage(error_name)
             return False
         _set_machine_ui(feed=feed)
+        global _PIECE_BLOWER_MM
+        _PIECE_BLOWER_MM = _feed_dict_length_mm(feed)
         return True
 
     # Step 4. Activar pinzas; desactivar holder y encoder; esperar.
@@ -1746,11 +1975,12 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             {"gripper": True, "holder": False, "encoder": False}
         )
         if not ok_hw:
-            _cycle_fail(code or "E010")
+            if code:
+                _cycle_fail(code)
             return False
         return True
 
-    # Step 5. LM Guide a |L| + offset de corte; esperar en corte.
+    # Step 5. LM Guide a |L| − 55 mm + offset de corte; esperar en corte.
     if step_id == "5":
         pos = _active_cut_deposit()
         if pos is None:
@@ -1790,7 +2020,21 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False}), "E019"):
             return False
-        return _cycle_sleep_ms(int(params["ms_after_grip_release"]))
+        # La suelta de pinzas es el arranque del siguiente ciclo, si lo hay.
+        if (
+            _next_piece_follows()
+            and not _OVERLAP["on"]
+            and not _OVERLAP["feed_done"]
+            and not _CYCLE_CTRL["pause_after_step"].is_set()
+            and not _cycle_should_stop()
+        ):
+            if not _overlap_arm(params):
+                return False
+        if not _cycle_sleep_ms(int(params["ms_after_grip_release"])):
+            if _cycle_should_stop():
+                _overlap_reset()
+            return False
+        return True
 
     # Step 8. Despeje, regreso a home y blower en ese regreso.
     if step_id == "8":
@@ -1805,36 +2049,64 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             else abs(_num(params.get("gripper_clearance_mm"), 0.0))
         )
         clear_at = _clear_of(deposit, clearance)
+        if (
+            _next_piece_follows()
+            and not _OVERLAP["on"]
+            and not _OVERLAP["feed_done"]
+            and not _cycle_should_stop()
+        ):
+            if not _overlap_arm(params):
+                return False
         if abs(clear_at - deposit) >= 0.05:
             _push_event(f"Despeje de pinzas: {clear_at:.2f} mm.")
-            if not _cycle_move_lm_mm(clear_at):
+            feed_inject, feed_line = _overlap_feed_hook()
+            if not _cycle_move_lm_mm(clear_at, inject=feed_inject, on_line=feed_line):
                 return False
         home_result: dict = {}
 
         def send_home() -> None:
+            feed_inject, feed_line = _overlap_feed_hook()
             home_result["sent"] = _cycle_motion_send(
-                {"op": "lmguide_move", "target": "home"}, timeout_s=90.0
+                {"op": "lmguide_move", "target": "home"},
+                timeout_s=90.0,
+                inject=feed_inject,
+                on_line=feed_line,
             )
 
         home_thread = threading.Thread(target=send_home, daemon=True)
         home_thread.start()
         if not _cycle_sleep_ms(int(params["ms_blower_delay"])):
-            _send_motion_urgent(['{"op":"lmguide_stop"}'])
+            _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
             return False
         blower_ms = _cycle_blower_duration_ms(params)
         if not _plc_cmd_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
-            _send_motion_urgent(['{"op":"lmguide_stop"}'])
+            _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
             return False
         blower_deadline = time.time() + (blower_ms / 1000.0)
 
         while home_thread.is_alive():
             if _cycle_wait_if_paused():
-                _send_motion_urgent(['{"op":"lmguide_stop"}'])
+                _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
                 _cycle_plc_send({"op": "blower_off"})
                 return False
             home_thread.join(0.05)
 
-        if not _motion_cmd_serial_ok(home_result.get("sent") or {}, "E043"):
+        if _cycle_should_stop():
+            return False
+        home_sent = home_result.get("sent") or {}
+        replies = home_sent.get("replies") or []
+        feed_failed = bool(_OVERLAP["feed_error"])
+        if _OVERLAP["feed_sent"] and not _OVERLAP["feed_done"]:
+            if _replies_have_op(replies, "feed_stage"):
+                if not _overlap_accept_feed(replies):
+                    feed_failed = True
+            elif not _OVERLAP["feed_error"]:
+                _OVERLAP["feed_sent"] = False
+        home_ok = _motion_cmd_serial_ok(home_sent, "E043")
+        if home_ok and _OVERLAP["on"] and not _OVERLAP["feed_done"] and not _OVERLAP["feed_sent"]:
+            if not _overlap_feed_after_home():
+                feed_failed = True
+        if not home_ok:
             return False
 
         t_home_ok = time.time()
@@ -1858,9 +2130,233 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
                 _cycle_plc_send({"op": "blower_off"})
                 return False
             time.sleep(0.05)
+        if feed_failed:
+            return False
         return True
 
     return True
+
+
+def _next_piece_follows() -> bool:
+    """Hay otra pieza del lote después de la que se está cerrando."""
+    if not _LOT["active"] or _LOT["tray_wait"]:
+        return False
+    done_after = int(_LOT["cycles_done"]) + 1
+    if done_after >= int(_LOT["cycles_total"]):
+        return False
+    deposits = int(_LOT["deposits_per_tray"] or 0)
+    if deposits and done_after % deposits == 0:
+        return False
+    return True
+
+
+def _overlap_reset() -> None:
+    _OVERLAP["gen"] += 1
+    _OVERLAP["on"] = False
+    _OVERLAP["feed_sent"] = False
+    _OVERLAP["feed_done"] = False
+    _OVERLAP["holder_error"] = ""
+    _OVERLAP["feed"] = None
+    _OVERLAP["blower_mm"] = None
+    _OVERLAP["t0"] = None
+    _OVERLAP["feed_error"] = False
+    _OVERLAP["holder_ready"].clear()
+    global _STEP4_CLOSES
+    _STEP4_CLOSES = False
+    if _MACHINE_STATE.get("ciclo_paralelo_id"):
+        _set_machine_ui(paralelo_id="")
+
+
+def _plc_accepted(sent: dict, op: str) -> bool:
+    if not sent.get("sent"):
+        return False
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == op:
+            return bool(msg.get("ok", True))
+    return False
+
+
+def _overlap_start_holder(params: dict) -> None:
+    gen = int(_OVERLAP["gen"])
+
+    def run() -> None:
+        if _OVERLAP["gen"] != gen or _cycle_should_stop():
+            return
+        _set_machine_ui(paralelo_id="2")
+        sent = _cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": True})
+        if _OVERLAP["gen"] != gen:
+            return
+        if not _plc_accepted(sent, "valve"):
+            _OVERLAP["holder_error"] = sent.get("code") or "E019"
+            return
+        if not _cycle_sleep_ms(int(params["ms_holder_enc_stable"])):
+            if _OVERLAP["gen"] == gen:
+                _OVERLAP["holder_error"] = "stop"
+            return
+        ok_hw, code = _plc_confirm({"holder": True, "encoder": True})
+        if _OVERLAP["gen"] != gen:
+            return
+        if not ok_hw:
+            if code:
+                _OVERLAP["holder_error"] = code
+            return
+        _OVERLAP["holder_ready"].set()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _overlap_arm(params: dict) -> bool:
+    """Paso 1 del siguiente ciclo: datos y ajuste. El holder sale en paralelo."""
+    if _OVERLAP["on"] or _OVERLAP["feed_done"]:
+        return True
+    if not _motion_cmd_serial_ok(
+        _cycle_motion_send(_motion_data_flat(_MOTION_DATA), timeout_s=2.0),
+        "E043",
+    ):
+        return False
+    if not _motion_cmd_serial_ok(_push_saved_motion_tune(), "E043"):
+        return False
+    _OVERLAP["on"] = True
+    _OVERLAP["t0"] = time.time()
+    _OVERLAP["feed_sent"] = False
+    _OVERLAP["feed_done"] = False
+    _OVERLAP["holder_error"] = ""
+    _OVERLAP["feed"] = None
+    _OVERLAP["blower_mm"] = None
+    _OVERLAP["feed_error"] = False
+    _OVERLAP["holder_ready"].clear()
+    nxt = int(_LOT["cycles_done"]) + 2
+    total = int(_LOT["cycles_total"])
+    _set_machine_ui(
+        paralelo_id="1",
+        mensaje=(
+            _cycle_piece_prefix()
+            + f"Pinzas libres. Ciclo {nxt} de {total} inicia en paralelo."
+        ),
+    )
+    _push_event(f"Ciclo {nxt} de {total}: paso 1 en paralelo con la descarga.")
+    _overlap_start_holder(params)
+    return True
+
+
+def _overlap_feed_hook():
+    """Alimentación del siguiente ciclo mientras el eje todavía se mueve."""
+    if not _OVERLAP["on"] or _OVERLAP["feed_done"]:
+        return None, None
+    return _overlap_feed_inject, _overlap_on_feed_line
+
+
+def _overlap_on_feed_line(msg: dict) -> None:
+    if msg.get("op") != "feed_stage" or _OVERLAP["feed_done"]:
+        return
+    if not _overlap_accept_feed([_compact(msg)]):
+        return
+    _set_machine_ui(
+        mensaje=(
+            _cycle_piece_prefix()
+            + "Pasos 1 a 3 listos. Esperando home con pinzas abiertas para cerrar."
+        ),
+    )
+
+
+def _overlap_feed_inject():
+    """None sigue esperando al holder. [] no escribe. Una lista se manda una vez."""
+    if not _OVERLAP["on"] or _OVERLAP["feed_done"] or _OVERLAP["feed_sent"]:
+        return []
+    if _cycle_should_stop() or _OVERLAP["holder_error"]:
+        return []
+    if not _OVERLAP["holder_ready"].is_set():
+        return None
+    _OVERLAP["feed_sent"] = True
+    nxt = int(_LOT["cycles_done"]) + 2
+    total = int(_LOT["cycles_total"])
+    _set_machine_ui(
+        paralelo_id="3",
+        mensaje=_cycle_piece_prefix() + f"Home y soplo. Ciclo {nxt} de {total} alimenta.",
+    )
+    _push_event(f"Ciclo {nxt} de {total}: alimentación en paralelo con el regreso a home.")
+    sides = _run_sides()
+    payload = _feed_stage_payload(sides if sides in ("R", "L") else None)
+    return [_compact(payload)]
+
+
+def _replies_have_op(replies, op: str) -> bool:
+    for raw in replies or []:
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == op:
+            return True
+    return False
+
+
+def _overlap_accept_feed(replies) -> bool:
+    found, ok, error_name, feed = _read_feed_stage({"replies": replies})
+    if _cycle_should_stop() and (not found or not ok):
+        return False
+    if not found or not ok:
+        _OVERLAP["feed_error"] = True
+        if not _MACHINE_STATE.get("ciclo_error"):
+            _fail_feed_stage(error_name if found else "")
+        return False
+    _OVERLAP["feed_done"] = True
+    _OVERLAP["feed"] = feed
+    _OVERLAP["blower_mm"] = _feed_dict_length_mm(feed)
+    _set_machine_ui(feed=feed, paralelo_id="")
+    nxt = int(_LOT["cycles_done"]) + 2
+    total = int(_LOT["cycles_total"])
+    _push_event(f"Ciclo {nxt} de {total}: pasos 1 a 3 listos.")
+    return True
+
+
+def _overlap_feed_after_home() -> bool:
+    """El home ya terminó y el holder no alcanzó a cruzarse con ese movimiento."""
+    if _OVERLAP["feed_done"]:
+        return True
+    if _cycle_should_stop():
+        return False
+    if _OVERLAP["holder_error"] and not _OVERLAP["holder_ready"].is_set():
+        _cycle_fail(_OVERLAP["holder_error"] if _OVERLAP["holder_error"] != "stop" else "E010")
+        return False
+    if not _OVERLAP["holder_ready"].wait(3.0):
+        if _cycle_should_stop():
+            return False
+        _cycle_fail(_OVERLAP["holder_error"] or "E010")
+        return False
+    _OVERLAP["feed_sent"] = True
+    _set_machine_ui(paralelo_id="3")
+    sides = _run_sides()
+    payload = _feed_stage_payload(sides if sides in ("R", "L") else None)
+    sent = _cycle_motion_send(payload, timeout_s=65.0)
+    if _cycle_should_stop():
+        return False
+    if not sent.get("sent"):
+        _cycle_fail(sent.get("code") or "E043")
+        return False
+    return _overlap_accept_feed(sent.get("replies") or [])
+
+
+def _overlap_handoff() -> tuple[int, float | None]:
+    """Paso 8 ya acabó (home, pinzas abiertas) y los pasos 1 a 3 también."""
+    if not _OVERLAP["feed_done"]:
+        return 0, None
+    global _PIECE_BLOWER_MM, _STEP4_CLOSES
+    mm = _OVERLAP["blower_mm"]
+    t0 = _OVERLAP["t0"]
+    feed = _OVERLAP["feed"]
+    _overlap_reset()
+    _STEP4_CLOSES = True
+    if mm is not None:
+        _PIECE_BLOWER_MM = mm
+    if feed is not None:
+        _set_machine_ui(feed=feed)
+    _push_event("Home con pinzas abiertas. El paso 4 cierra y sigue.")
+    return 3, t0
 
 
 def _finish_piece_idle(mensaje: str) -> None:
@@ -1879,7 +2375,9 @@ def _finish_piece_idle(mensaje: str) -> None:
         progreso_pct=100,
         tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
         tiempo_corriendo_s=0,
+        paralelo_id="",
     )
+    _overlap_reset()
     _cycle_latch_reset()
 
 
@@ -1895,8 +2393,10 @@ def _enter_tray_wait(deposits: int) -> None:
         progreso_pct=100,
         tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
         tiempo_corriendo_s=0,
+        paralelo_id="",
     )
     _push_event(f"Charola llena — {deposits} ciclos.", "warn")
+    _overlap_reset()
     _cycle_latch_reset()
 
 
@@ -1922,10 +2422,25 @@ def _home_after_tray() -> bool:
     return False
 
 
-def _run_one_piece(start_index: int) -> bool:
+def _piece_log_name() -> str:
+    if _LOT["active"]:
+        n = int(_LOT["cycles_done"]) + 1
+        total = int(_LOT["cycles_total"])
+        return f"Pieza {n} de {total}"
+    msg = str(_MACHINE_STATE.get("mensaje") or "").rstrip(".")
+    if msg.startswith("Pieza de prueba"):
+        return msg
+    return "Pieza"
+
+
+def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
     global _LAST_PIECE_S
     params = _load_cycle_params()
-    t0 = time.time()
+    t0 = started_at if started_at else time.time()
+    fresh = start_index <= 0
+    name = _piece_log_name()
+    if fresh:
+        _push_event(f"{name} inicia.")
     for idx in range(start_index, len(CYCLE_STEPS)):
         step = CYCLE_STEPS[idx]
         if _cycle_should_stop():
@@ -1975,21 +2490,25 @@ def _run_one_piece(start_index: int) -> bool:
             _push_event("Pausa — paso actual completado.", "warn")
             return False
     _LAST_PIECE_S = time.time() - t0
+    if fresh or started_at:
+        _push_event(f"{name} termina en {_LAST_PIECE_S:.1f} s.")
+    else:
+        _push_event(f"{name} termina.")
     return True
 
 
 def _cycle_worker(start_index: int = 0) -> None:
     lot_mode = bool(_LOT["active"])
     index = start_index
+    started_at = None
     try:
         while True:
             if _LOT["home_before"] and not _home_after_tray():
                 return
-            if not _run_one_piece(index):
+            if not _run_one_piece(index, started_at):
                 return
             _mant_add_cycle()
             if not lot_mode:
-                _push_event(f"Ciclo terminado en {_LAST_PIECE_S:.1f} s.")
                 _finish_piece_idle("Ciclo completado. Listo para siguiente Start.")
                 return
             if _cycle_should_stop() or not _LOT["active"]:
@@ -2013,12 +2532,20 @@ def _cycle_worker(start_index: int = 0) -> None:
                 _enter_tray_wait(deposits)
                 return
             _cycle_latch_reset()
-            _set_machine_ui(
-                feed={"R": None, "L": None},
-                tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
-                tiempo_corriendo_s=0,
-            )
-            index = 0
+            index, started_at = _overlap_handoff()
+            if index == 0:
+                _set_machine_ui(
+                    feed={"R": None, "L": None},
+                    tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
+                    tiempo_corriendo_s=0,
+                    paralelo_id="",
+                )
+            else:
+                _set_machine_ui(
+                    tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
+                    tiempo_corriendo_s=0,
+                    paralelo_id="",
+                )
     finally:
         _CYCLE_CTRL["pause_after_step"].clear()
         _CYCLE_CTRL["stop"].clear()
@@ -2026,7 +2553,7 @@ def _cycle_worker(start_index: int = 0) -> None:
 
 
 def _cycle_blocked_by_routine() -> str:
-    if not (_MACHINE_STATE.get("checklist") or {}).get("ok"):
+    if not _checklist_bypassed() and not (_MACHINE_STATE.get("checklist") or {}).get("ok"):
         return "Completa la revisión de arranque antes de Iniciar."
     if _MACHINE_STATE.get("carga_material"):
         return "Apaga la carga de material antes de Iniciar."
@@ -2055,8 +2582,6 @@ def _cycle_start() -> tuple[bool, str]:
         return False, qty_err
     plan, plan_err = _tray_plan(length, params)
     if plan_err:
-        _push_event(plan_err, "error")
-        _set_machine_ui(mensaje=plan_err)
         return False, plan_err
     ready, link_err = _links_ready_for_cycle()
     if not ready:
@@ -2080,10 +2605,16 @@ def _cycle_start() -> tuple[bool, str]:
     _LOT["sides"] = sides
     _CYCLE_CTRL["stop"].clear()
     _CYCLE_CTRL["pause_after_step"].clear()
+    _overlap_reset()
     _cycle_latch_reset()
     _set_machine_ui(
+        estado="running",
+        estado_label="Ciclo en marcha",
+        mensaje="Secuencia automática iniciada.",
+        en_curso=True,
         ciclo_error="",
         feed={"R": None, "L": None},
+        step_id="1",
         step_index=0,
         progreso_pct=0,
         tiempo_ciclo_s=None,
@@ -2155,6 +2686,12 @@ def _charola_vacia(_data=None) -> tuple[bool, str]:
     _CYCLE_CTRL["stop"].clear()
     _CYCLE_CTRL["pause_after_step"].clear()
     _cycle_latch_reset()
+    _set_machine_ui(
+        estado="running",
+        estado_label="Ciclo en marcha",
+        mensaje="Charola vacía. Regresando el eje a cero.",
+        en_curso=True,
+    )
     th = threading.Thread(target=_cycle_worker, args=(0,), daemon=True)
     _CYCLE_CTRL["thread"] = th
     th.start()
@@ -2168,6 +2705,7 @@ def _cycle_stop() -> None:
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
     _CYCLE_CTRL["stop"].set()
+    _overlap_reset()
     _CYCLE_CTRL["pause_after_step"].clear()
     _ROUTINE["stop"].set()
     if _serial_port("motion"):
@@ -2189,6 +2727,8 @@ def _cycle_stop() -> None:
         _ROUTINE["thread"] and _ROUTINE["thread"].is_alive()
     ):
         _purga_finish(True)
+    if not running:
+        _CYCLE_CTRL["stop"].clear()
     _push_event("Stop solicitado — detención inmediata.", "warn")
 
 
@@ -2404,6 +2944,8 @@ def _start_routine(fn) -> tuple[bool, str]:
     busy = _motion_owner_busy()
     if busy:
         return False, busy
+    if not _cycle_thread_alive():
+        _CYCLE_CTRL["stop"].clear()
     _ROUTINE["stop"].clear()
     th = threading.Thread(target=_run_routine, args=(fn,), daemon=True)
     _ROUTINE["thread"] = th
@@ -2448,10 +2990,28 @@ def _routine_try_reset_fault() -> bool:
     return True
 
 
-def _feed_once(side: str | None):
-    payload = {"op": "feed_stage"}
+def _feed_stage_payload(side: str | None = None) -> dict:
+    """feed_stage con el botón de validación tal como está guardado."""
+    tune = _load_motion_tune()
+    payload = {
+        "op": "feed_stage",
+        "feed_validate_encoder": bool(tune["feed_stage"]["validate_encoder"]),
+    }
     if side in ("R", "L"):
         payload["side"] = side
+    return payload
+
+
+def _push_saved_motion_tune() -> dict:
+    """Publica Motion.json. El MCU no conserva el botón entre reinicios."""
+    return _cycle_motion_send(_motion_tune_flat(_load_motion_tune()), timeout_s=2.0)
+
+
+def _feed_once(side: str | None):
+    tune_sent = _push_saved_motion_tune()
+    if not tune_sent.get("sent") or not _motion_cmd_ok(tune_sent, "set_tune"):
+        return False, tune_sent.get("code") or "E043", {"R": None, "L": None}
+    payload = _feed_stage_payload(side)
     sent = _cycle_motion_send(payload, timeout_s=65.0)
     found, ok, error_name, feed = _read_feed_stage(sent)
     _set_machine_ui(feed=feed)
@@ -2490,7 +3050,7 @@ def _feeder_test(side: str, tune: dict) -> dict:
     if not holder_ok:
         return {
             "ok": False,
-            "error": error_codes.format_message(code or "E010"),
+            "error": error_codes.format_message(code) if code else "Detenido.",
         }
 
     tune_payload = _motion_tune_flat(tune)
@@ -2501,7 +3061,7 @@ def _feeder_test(side: str, tune: dict) -> dict:
             "error": tune_sent.get("reason") or "Motion no aceptó los parámetros.",
         }
 
-    feed_payload = {"op": "feed_stage", "side": side}
+    feed_payload = _feed_stage_payload(side)
     feed_sent = _cycle_motion_send(feed_payload, timeout_s=65.0)
     found, feed_ok, error_name, feed = _read_feed_stage(feed_sent)
     _set_machine_ui(feed=feed)
@@ -2522,6 +3082,20 @@ def _feeder_test(side: str, tune: dict) -> dict:
         "replies": replies,
         "feed": feed,
     }
+
+
+def _feed_laser():
+    """Purga: ambos lados siguen hasta su láser. No valida encoder ni compensa."""
+    payload = {"op": "feed_stage", "mode": "laser"}
+    sent = _cycle_motion_send(payload, timeout_s=20.0)
+    found, ok, error_name, feed = _read_feed_stage(sent)
+    _set_machine_ui(feed=feed)
+    if not sent.get("sent"):
+        return False, sent.get("code") or "E043", feed
+    if not found or not ok:
+        err = error_name or "unknown"
+        return False, error_codes.feed_stage_code(err), feed
+    return True, "", feed
 
 
 def _feed_clean():
@@ -2600,7 +3174,8 @@ def _purga_prepare() -> None:
         mensaje=(
             f"Eje en parque ({PURGE_PARK_MM:.0f} mm). "
             "Alimentar y Limpiar cierran holder y encoder. "
-            "Continuar corta. Terminar cierra la purga."
+            "Continuar: home, corte, depósito a 100 mm y home. "
+            "Terminar cierra la purga."
         ),
     )
 
@@ -2632,7 +3207,8 @@ def _purga_close_holder() -> bool:
         return False
     ok_hw, code = _plc_confirm({"holder": True, "encoder": True})
     if not ok_hw:
-        _push_event(error_codes.format_message(code or "E010"), "error")
+        if code:
+            _push_event(error_codes.format_message(code), "error")
         return False
     return True
 
@@ -2645,8 +3221,8 @@ def _purga_alimentar_run() -> None:
         else:
             _set_routine_ui(rutina_fase="espera", mensaje="No se cerró holder y encoder.")
         return
-    _set_routine_ui(mensaje="Alimentación: láser y encoder.")
-    ok, code, _feed = _feed_once(None)
+    _set_routine_ui(mensaje="Alimentación: ambos lados hasta el láser.")
+    ok, code, _feed = _feed_laser()
     if _ROUTINE["stop"].is_set():
         _purga_finish(True)
         return
@@ -2654,82 +3230,71 @@ def _purga_alimentar_run() -> None:
         _push_event(error_codes.format_message(code), "error")
         _set_routine_ui(
             rutina_fase="espera",
-            mensaje="La alimentación no validó. Puedes repetir, continuar o terminar.",
+            mensaje="Un lado no llegó al láser. Puedes repetir, continuar o terminar.",
         )
         return
     _set_routine_ui(
         rutina_fase="espera",
-        mensaje="Alimentación lista. Continuar corta. Terminar cierra la purga.",
+        mensaje="Alimentación lista. Continuar: home, corte, depósito a 100 mm y home.",
     )
 
 
 def _purge_cut() -> bool:
+    """Solo purga, al pulsar Continuar: home, corte con pinzas, depósito fijo, home."""
     params = _load_cycle_params()
-    length = _target_length_mm()
     _set_routine_ui(
         rutina_fase="corte",
         rutina_manos=True,
         estado_label="Purga",
-        mensaje="NO METAS LAS MANOS",
+        mensaje="NO METAS LAS MANOS. Regresando a 0.",
     )
 
     def sent_ok(sent) -> bool:
         op = str((sent.get("last_payload") or {}).get("op") or "")
         return bool(op and _motion_cmd_ok(sent, op)) and not _ROUTINE["stop"].is_set()
 
+    if not _routine_move_lm_mm(0.0) or _ROUTINE["stop"].is_set():
+        return False
+
+    _set_routine_ui(mensaje="NO METAS LAS MANOS. Corte y pinzas en 0.")
     if not sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True})):
         return False
     if not sent_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": False})):
         return False
-
-    if length >= 1.0:
-        if not sent_ok(_cycle_plc_send({"op": "valve", "name": "cutters", "on": True})):
-            return False
-        if not _routine_sleep_ms(int(params["ms_cutter_on"])):
-            return False
-        if not sent_ok(_cycle_plc_send({"op": "valve", "name": "cutters", "on": False})):
-            return False
-        if not _routine_sleep_ms(PURGE_AFTER_CUT_MS):
-            return False
-        pos = _lm_cut_and_discharge(params)
-        if pos is not None:
-            _cut_mm, disc = pos
-            tune = _load_motion_tune()
-            puu = _mm_to_puu(disc)
-            move = _cycle_motion_send(
-                {
-                    "op": "lmguide_move",
-                    "puu": puu,
-                    "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
-                },
-                timeout_s=40.0,
-            )
-            if not _motion_cmd_ok(move, "lmguide_move"):
-                return False
-            if not _routine_sleep_ms(int(params["ms_lm_at_discharge"])):
-                return False
-        else:
-            _push_event("Sin longitud suficiente para el depósito. El eje se queda en cero.", "warn")
-        if not sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False})):
-            return False
-        if not _routine_sleep_ms(int(params["ms_after_grip_release"])):
-            return False
-    else:
-        _push_event("Sin longitud de pieza: la purga no corta.", "warn")
-
-    home = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=40.0)
-    if not _motion_cmd_ok(home, "lmguide_move"):
+    if not sent_ok(_cycle_plc_send({"op": "valve", "name": "cutters", "on": True})):
         return False
-    if length >= 1.0:
-        if not _routine_sleep_ms(int(params["ms_blower_delay"])):
-            return False
-        blower_ms = _cycle_blower_duration_ms(params)
-        if not sent_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms})):
-            return False
-        if not _routine_sleep_ms(blower_ms):
-            return False
-        if not _routine_sleep_ms(int(params["ms_at_home_end"])):
-            return False
+    if not _routine_sleep_ms(int(params["ms_cutter_on"])):
+        return False
+    if not sent_ok(_cycle_plc_send({"op": "valve", "name": "cutters", "on": False})):
+        return False
+    if not _routine_sleep_ms(PURGE_AFTER_CUT_MS):
+        return False
+
+    _set_routine_ui(
+        mensaje=f"NO METAS LAS MANOS. Depósito a {PURGE_DEPOSIT_MM:.0f} mm.",
+    )
+    if not _routine_move_lm_mm(PURGE_DEPOSIT_MM):
+        return False
+    if not _routine_sleep_ms(int(params["ms_lm_at_discharge"])):
+        return False
+    if not sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False})):
+        return False
+    if not _routine_sleep_ms(int(params["ms_after_grip_release"])):
+        return False
+
+    _set_routine_ui(mensaje="NO METAS LAS MANOS. Regresando a home.")
+    home = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=40.0)
+    if not _motion_cmd_ok(home, "lmguide_move") or _ROUTINE["stop"].is_set():
+        return False
+    if not _routine_sleep_ms(int(params["ms_blower_delay"])):
+        return False
+    blower_ms = _cycle_blower_duration_ms(params)
+    if not sent_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms})):
+        return False
+    if not _routine_sleep_ms(blower_ms):
+        return False
+    if not _routine_sleep_ms(int(params["ms_at_home_end"])):
+        return False
     _cycle_plc_send({"op": "all_off"})
     return not _ROUTINE["stop"].is_set()
 
@@ -2768,7 +3333,7 @@ def _purga_limpiar_run() -> None:
         return
     _set_routine_ui(
         rutina_fase="espera",
-        mensaje="Limpieza lista. Continuar corta. Terminar cierra la purga.",
+        mensaje="Limpieza lista. Continuar: home, corte, depósito a 100 mm y home.",
     )
 
 
@@ -3207,7 +3772,7 @@ def _checklist_medicion(data) -> tuple[bool, str]:
         mm_r = float(data.get("mm_r"))
     except (TypeError, ValueError):
         return False, "Anota las dos longitudes en milímetros."
-    expected = _target_length_mm() + CHECKLIST_EXTRA_MM
+    expected = _target_length_mm()
     tol = float(_load_cycle_params().get("tolerance_mm") or 2.0)
     if abs(mm_l - expected) > tol or abs(mm_r - expected) > tol:
         return False, f"Fuera de tolerancia. Se espera {expected:.1f} mm ±{tol:.0f}."
@@ -3347,6 +3912,12 @@ def set_cantidad():
 @app.route("/api/state", methods=["GET"])
 def get_state():
     return jsonify({"ok": True, **_public_machine_state()})
+
+
+@app.route("/api/events/clear", methods=["POST"])
+def clear_events():
+    rev = _clear_event_log()
+    return jsonify({"ok": True, "eventos_rev": rev})
 
 
 @app.route("/api/errors", methods=["GET"])
@@ -3620,8 +4191,8 @@ def plc_cmd():
         line = _build_plc_line(op, body)
     except (TypeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+    sent = _plc_send_payload(line, push_log=False)
     packed = _compact(line)
-    sent = _send_plc_serial([packed])
     command_ok = None
     for raw in reversed(sent.get("replies") or []):
         try:
@@ -3690,8 +4261,10 @@ def serial_ports():
     if len(chosen) != len({port.upper() for port in chosen}):
         return jsonify({"ok": False, "error": "Cada módulo tiene que usar un COM distinto."}), 400
 
+    with _serial_cfg_lock:
+        checklist_bypass = bool(_serial_cfg.get("checklist_bypass"))
     try:
-        _save_serial_cfg(motion, plc, andon, andon_disable_ui)
+        _save_serial_cfg(motion, plc, andon, andon_disable_ui, checklist_bypass)
     except OSError:
         return jsonify({"ok": False, "error": "No se pudo guardar el puerto."}), 500
 
@@ -3707,6 +4280,24 @@ def serial_ports():
             "andon_none_value": _ANDON_NONE_TOKEN,
         }
     )
+
+
+@app.route("/api/settings/checklist-bypass", methods=["GET", "POST"])
+def checklist_bypass_setting():
+    if request.method == "POST":
+        body = request.get_json(silent=True) or {}
+        enabled = bool(body.get("enabled"))
+        with _serial_cfg_lock:
+            motion = str(_serial_cfg.get("motion") or "")
+            plc = str(_serial_cfg.get("plc") or "")
+            andon = str(_serial_cfg.get("andon") or "")
+            andon_disabled = bool(_serial_cfg.get("andon_disabled"))
+        try:
+            _save_serial_cfg(motion, plc, andon, andon_disabled, enabled)
+        except OSError:
+            return jsonify({"ok": False, "error": "No se pudo guardar la configuración."}), 500
+        _push_event("Bypass de checklist activo." if enabled else "Checklist obligatorio.")
+    return jsonify({"ok": True, "enabled": _checklist_bypassed()})
 
 
 @app.route("/api/serial/test", methods=["POST"])
@@ -3747,6 +4338,14 @@ def serial_module_test():
     )
 
 
+def _action_rejected(err: str):
+    """El rechazo queda en el letrero. El panel de eventos puede estar cerrado."""
+    if err:
+        _push_event(err, "error")
+        _set_machine_ui(mensaje=err)
+    return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
+
+
 @app.route("/api/action", methods=["POST"])
 def action():
     """Orquestador: acciones de proceso (Start / Pausa / …) y registro del resto."""
@@ -3758,15 +4357,13 @@ def action():
     if action_name in _ROUTINE_ACTIONS:
         ok, err = _ROUTINE_ACTIONS[action_name](data)
         if not ok:
-            if err:
-                _set_machine_ui(mensaje=err)
-            return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
+            return _action_rejected(err)
         message = err or "Listo."
     elif block == "proceso":
         if action_name == "start":
             ok, err = _cycle_start()
             if not ok:
-                return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
+                return _action_rejected(err)
             message = "Lote iniciado."
         elif action_name == "pause":
             _cycle_pause()
@@ -3774,7 +4371,7 @@ def action():
         elif action_name == "resume":
             ok, err = _cycle_resume()
             if not ok:
-                return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
+                return _action_rejected(err)
             message = "Reanudar."
         elif action_name == "stop":
             _cycle_stop()
@@ -3782,7 +4379,7 @@ def action():
         elif action_name == "reset":
             ok, err = _cycle_reset_error()
             if not ok:
-                return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
+                return _action_rejected(err)
             message = "Reset de error."
         else:
             message = f"Acción proceso: {action_name}"

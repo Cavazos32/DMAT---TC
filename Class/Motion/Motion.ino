@@ -81,7 +81,10 @@ struct FeedStageResult {
 };
 
 // Sin "side" y sin "mode" el ciclo usa ambos lados, valida encoder y el timeout de Parameters.h.
+// "mode":"laser" (purga): cada lado sigue hasta su láser. No valida encoder ni compensa.
 // "mode":"clean" alimenta el tiempo indicado y no se detiene en el láser.
+// Si el láser de un lado ya está activo, ese lado no arranca. La compensación de ese lado
+// se manda una sola vez mientras el láser siga activo.
 struct FeedStageRequest {
   bool useR;
   bool useL;
@@ -91,6 +94,9 @@ struct FeedStageRequest {
 };
 
 static FeedStageResult gLastFeedStage = {};
+// Compensación ya hecha en este tramo con el láser activo. Se olvida si el láser está libre
+// o si el lado se alimenta a ciegas (limpieza).
+static bool gFeedOffsetApplied[MOTION_SIDE_COUNT] = {false, false};
 
 // ── Utilidades JSON plano (Serial) ──────────────────────────────────────────
 
@@ -117,6 +123,14 @@ static long jsonReadLong(const char* json, const char* key, long defVal) {
   const char* p = nullptr;
   if (!jsonFindKey(json, key, &p)) return defVal;
   return strtol(p, nullptr, 10);
+}
+
+static bool jsonReadBool(const char* json, const char* key, bool defVal) {
+  const char* p = nullptr;
+  if (!jsonFindKey(json, key, &p)) return defVal;
+  if (strncmp(p, "true", 4) == 0 || *p == '1') return true;
+  if (strncmp(p, "false", 5) == 0 || *p == '0') return false;
+  return defVal;
 }
 
 static void runtimeInit(MotionRuntime* rt) {
@@ -606,17 +620,61 @@ static bool feederInitNode(MotionSide side) {
   return true;
 }
 
-/** Init CAN + ambos feeders. Respuesta serial como antes (última línea ok_r/ok_l). */
-static bool feederInitBus(bool forceReinit = false) {
-  if (!forceReinit && gRt.feederReady[MOTION_SIDE_R] && gRt.feederReady[MOTION_SIDE_L]) {
-    Serial.println(F("{\"op\":\"feeder_init\",\"ok\":true,\"ok_r\":true,\"ok_l\":true}"));
-    return true;
+// 0 = no contestó, 1 = Operation Enabled, 2 = fault, 3 = contestó en otro estado.
+static int feederProbe(MotionSide side) {
+  uint16_t sw = 0;
+  if (!canReadStatusWord(side, &sw, FEEDER_SDO_CONFIRM_MS)) return 0;
+  if ((sw & 0x0008u) != 0) return 2;
+  if ((sw & 0x006Fu) == 0x0027u) return 1;
+  return 3;
+}
+
+// Fault reset y NMT pre-op solo si el nodo no contesta o está en fault.
+// Si contesta, siempre se recorre Shutdown → Switch on → Enable: un 6041
+// que parece Operation Enabled no mantiene el par si el eje está suelto.
+static bool feederBringUp(MotionSide side, int probe) {
+  if (probe == 2) {
+    if (!canSdoDownloadU16(feederNode(side), SERVO_OD_CONTROL_WORD, 0, 0x0080)) return false;
+    motionYieldMs(SERVO_CAN_FAULT_RESET_MS);
   }
-  bool canOk = forceReinit ? canRestartBus() : canPrepareForInit();
+  return feederInitNode(side);
+}
+
+static void printFeederInitResult(bool okR, bool okL) {
+  Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
+  Serial.print(okR && okL ? "true" : "false");
+  Serial.print(F(",\"ok_r\":"));
+  Serial.print(okR ? "true" : "false");
+  Serial.print(F(",\"ok_l\":"));
+  Serial.print(okL ? "true" : "false");
+  Serial.println(F("}"));
+}
+
+/** Init CAN + ambos feeders. Siempre aplica la habilitación CiA402. */
+static bool feederInitBus() {
+  bool canOk = canPrepareForInit();
   if (!canOk) {
     Serial.println(F("{\"op\":\"feeder_init\",\"ok\":false,\"error\":\"can_bus\"}"));
     return false;
   }
+
+  int probeR = feederProbe(MOTION_SIDE_R);
+  int probeL = feederProbe(MOTION_SIDE_L);
+
+  // Algún drive contestó: NMT operational y habilitar. Sin pre-op ni fault reset
+  // a un nodo que no está en fault; eso sí los deja sueltos.
+  if (probeR != 0 || probeL != 0) {
+    if (!canNmt(0x01)) {
+      Serial.println(F("{\"op\":\"feeder_init\",\"ok\":false,\"error\":\"nmt_tx\"}"));
+      return false;
+    }
+    motionYieldMs(SERVO_CAN_NMT_OPERATIONAL_MS);
+    bool okR = feederBringUp(MOTION_SIDE_R, probeR);
+    bool okL = feederBringUp(MOTION_SIDE_L, probeL);
+    printFeederInitResult(okR, okL);
+    return okR && okL;
+  }
+
   gRt.feederReady[MOTION_SIDE_R] = false;
   gRt.feederReady[MOTION_SIDE_L] = false;
 
@@ -641,13 +699,7 @@ static bool feederInitBus(bool forceReinit = false) {
   okR = feederInitNode(MOTION_SIDE_R);
   okL = feederInitNode(MOTION_SIDE_L);
 
-  Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
-  Serial.print(okR && okL ? "true" : "false");
-  Serial.print(F(",\"ok_r\":"));
-  Serial.print(okR ? "true" : "false");
-  Serial.print(F(",\"ok_l\":"));
-  Serial.print(okL ? "true" : "false");
-  Serial.println(F("}"));
+  printFeederInitResult(okR, okL);
   return okR && okL;
 }
 
@@ -676,6 +728,14 @@ static bool feederApplySideComp(MotionSide side) {
          canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
 }
 
+static bool feedApplyOffsetOnce(MotionSide side) {
+  if (gFeedOffsetApplied[side]) return true;
+  if (!feederApplySideComp(side)) return false;
+  int32_t counts = (int32_t)lroundf(gTune.feeder[side].compensationMm * SERVO_FEED_STEPS_PER_MM_S);
+  if (counts != 0) gFeedOffsetApplied[side] = true;
+  return true;
+}
+
 static bool feederJogStep(MotionSide side, int dirSign) {
   if (!gRt.feederReady[side]) return false;
   uint8_t node = feederNode(side);
@@ -693,16 +753,21 @@ static bool feederJogStep(MotionSide side, int dirSign) {
          canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x003F);
 }
 
-static bool feederRunPv(MotionSide side, int32_t velocitySigned) {
+static bool feederPreparePv(MotionSide side) {
   uint8_t node = feederNode(side);
   if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F)) return false;
   if (!canSdoDownloadU8(node, SERVO_OD_MODE_OF_OPERATION, 0, (uint8_t)SERVO_MODE_PV)) return false;
   if (!feederWriteProfile(side)) return false;
   if (!canSdoDownloadU32(node, SERVO_OD_TARGET_VELOCITY, 0, 0)) return false;
-  if (!canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F)) return false;
-  motionYieldMs(SERVO_CAN_CIA402_SHORT_MS);
-  if (!canSdoDownloadU32(node, SERVO_OD_TARGET_VELOCITY, 0, (uint32_t)velocitySigned)) return false;
-  return canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x000F);
+  return canSdoDownloadU16(node, SERVO_OD_CONTROL_WORD, 0, 0x010F);
+}
+
+static bool feederSetPvVelocity(MotionSide side, int32_t velocitySigned) {
+  return canSdoDownloadU32(feederNode(side), SERVO_OD_TARGET_VELOCITY, 0, (uint32_t)velocitySigned);
+}
+
+static bool feederReleasePv(MotionSide side) {
+  return canSdoDownloadU16(feederNode(side), SERVO_OD_CONTROL_WORD, 0, 0x000F);
 }
 
 static bool feederStopAll() {
@@ -783,7 +848,7 @@ static FeedStageRequest feedStageDefaultRequest() {
   FeedStageRequest req;
   req.useR = true;
   req.useL = true;
-  req.checkEncoder = true;
+  req.checkEncoder = gTune.validateEncoder;
   req.ignoreLaser = false;
   req.laserTimeoutMs = PARAM_FEED_STAGE_LASER_TIMEOUT_MS;
   return req;
@@ -813,22 +878,63 @@ static FeedStageResult FeedStage(FeedStageRequest req) {
 
   gFeedStageBusy = true;
 
-  bool sideFeedStopped[MOTION_SIDE_COUNT] = {!req.useR, !req.useL};
+  bool sideAtLaser[MOTION_SIDE_COUNT] = {false, false};
+  if (req.ignoreLaser) {
+    if (req.useR) gFeedOffsetApplied[MOTION_SIDE_R] = false;
+    if (req.useL) gFeedOffsetApplied[MOTION_SIDE_L] = false;
+  } else {
+    if (req.useR) {
+      sideAtLaser[MOTION_SIDE_R] = laserIsOn(MOTION_SIDE_R);
+      if (!sideAtLaser[MOTION_SIDE_R]) gFeedOffsetApplied[MOTION_SIDE_R] = false;
+    }
+    if (req.useL) {
+      sideAtLaser[MOTION_SIDE_L] = laserIsOn(MOTION_SIDE_L);
+      if (!sideAtLaser[MOTION_SIDE_L]) gFeedOffsetApplied[MOTION_SIDE_L] = false;
+    }
+  }
+
+  bool runR = req.useR && !sideAtLaser[MOTION_SIDE_R];
+  bool runL = req.useL && !sideAtLaser[MOTION_SIDE_L];
+  bool sideFeedStopped[MOTION_SIDE_COUNT] = {!runR, !runL};
   bool sideValidated[MOTION_SIDE_COUNT] = {!req.useR, !req.useL};
-  uint32_t tStart = millis();
+
+  if (sideAtLaser[MOTION_SIDE_R]) {
+    out.side[MOTION_SIDE_R].laserOn = true;
+    out.side[MOTION_SIDE_R].mmMeasured = encoderMmOfficial(MOTION_SIDE_R);
+    out.side[MOTION_SIDE_R].encOk = true;
+    sideValidated[MOTION_SIDE_R] = true;
+  }
+  if (sideAtLaser[MOTION_SIDE_L]) {
+    out.side[MOTION_SIDE_L].laserOn = true;
+    out.side[MOTION_SIDE_L].mmMeasured = encoderMmOfficial(MOTION_SIDE_L);
+    out.side[MOTION_SIDE_L].encOk = true;
+    sideValidated[MOTION_SIDE_L] = true;
+  }
 
   FeedStageError fail = FEED_STAGE_OK;
-  if (req.useR) {
-    encoderSetZero(MOTION_SIDE_R);
-    if (!feederRunPv(MOTION_SIDE_R, feederFeedVelocity(MOTION_SIDE_R)))
+  if (runR) {
+    encoderResetHw(MOTION_SIDE_R);
+    if (!feederPreparePv(MOTION_SIDE_R)) fail = FEED_STAGE_ERR_FEEDER;
+  }
+  if (fail == FEED_STAGE_OK && runL) {
+    encoderResetHw(MOTION_SIDE_L);
+    if (!feederPreparePv(MOTION_SIDE_L)) fail = FEED_STAGE_ERR_FEEDER;
+  }
+  if (fail == FEED_STAGE_OK && (runR || runL)) {
+    motionYieldMs(SERVO_CAN_CIA402_SHORT_MS);
+    if (runR && !feederSetPvVelocity(MOTION_SIDE_R, feederFeedVelocity(MOTION_SIDE_R)))
+      fail = FEED_STAGE_ERR_FEEDER;
+    if (fail == FEED_STAGE_OK && runL &&
+        !feederSetPvVelocity(MOTION_SIDE_L, feederFeedVelocity(MOTION_SIDE_L)))
       fail = FEED_STAGE_ERR_FEEDER;
   }
-  if (fail == FEED_STAGE_OK && req.useL) {
-    encoderSetZero(MOTION_SIDE_L);
-    if (!feederRunPv(MOTION_SIDE_L, feederFeedVelocity(MOTION_SIDE_L)))
+  if (fail == FEED_STAGE_OK && (runR || runL)) {
+    if (runR && !feederReleasePv(MOTION_SIDE_R)) fail = FEED_STAGE_ERR_FEEDER;
+    if (fail == FEED_STAGE_OK && runL && !feederReleasePv(MOTION_SIDE_L))
       fail = FEED_STAGE_ERR_FEEDER;
   }
 
+  uint32_t tStart = millis();
   while (fail == FEED_STAGE_OK) {
     pollSerial();
     uint32_t nowMs = millis();
@@ -907,8 +1013,8 @@ static FeedStageResult FeedStage(FeedStageRequest req) {
     // mmMeasured ya quedó congelado con el encoder quieto. La compensación
     // mueve el material después; no se vuelve a leer ni a validar.
     bool compOk = true;
-    if (req.useR) compOk = feederApplySideComp(MOTION_SIDE_R);
-    if (compOk && req.useL) compOk = feederApplySideComp(MOTION_SIDE_L);
+    if (req.useR) compOk = feedApplyOffsetOnce(MOTION_SIDE_R);
+    if (compOk && req.useL) compOk = feedApplyOffsetOnce(MOTION_SIDE_L);
     if (!compOk) out.error = FEED_STAGE_ERR_COMP;
   }
 
@@ -1121,8 +1227,10 @@ static bool lmguideMovePr1(int32_t targetPuu) {
   gLmAbortRequested = false;
   for (uint8_t attempt = 1; attempt <= PARAM_LM_MOVE_MAX_ATTEMPTS; attempt++) {
     if (!lmguideIssueMovePr1(targetPuu)) return false;
-    if (lmguideWaitForTarget(targetPuu, PARAM_LM_MOVE_TOLERANCE_MM, PARAM_LM_MOVE_DONE_TIMEOUT_MS))
+    if (lmguideWaitForTarget(targetPuu, PARAM_LM_MOVE_TOLERANCE_MM, PARAM_LM_MOVE_DONE_TIMEOUT_MS)) {
+      gRt.lmguideServoOn = true;
       return true;
+    }
     if (gLmAbortRequested) return false;
     (void)modbusWriteReg16(ASDA_REG_P5_007, 1000);
     delay(80);
@@ -1259,7 +1367,7 @@ static void motionHwInitRun() {
     Serial.println(F("{\"op\":\"motion_hw_init\",\"ok\":false,\"error\":\"safety\"}"));
     return;
   }
-  bool okFeed = feederInitBus(true);
+  bool okFeed = feederInitBus();
   if (!okFeed) {
     Serial.println(F("{\"op\":\"motion_hw_init\",\"ok\":false,\"error\":\"feeder_init\"}"));
     return;
@@ -1342,6 +1450,7 @@ static void applyTuneFromJson(const char* json) {
   gTune.lmguide.prSpeedRpm =
       lmClampSpeedRpm(jsonReadFloat(json, "lm_pr_speed_rpm", gTune.lmguide.prSpeedRpm));
   gTune.lmguide.posPuu = (int32_t)jsonReadLong(json, "lm_pos_puu", gTune.lmguide.posPuu);
+  gTune.validateEncoder = jsonReadBool(json, "feed_validate_encoder", gTune.validateEncoder);
 }
 
 static void applyDataFromJson(const char* json) {
@@ -1423,16 +1532,16 @@ static void handleSerialLine(char* line) {
   }
   if (strstr(line, "\"op\":\"feeder_init\"")) {
     if (strstr(line, "\"side\":\"both\"") || !strstr(line, "\"side\"")) {
-      feederInitBus(true);
+      feederInitBus();
     } else if (strstr(line, "\"side\":\"L\"")) {
-      bool ok = feederInitNode(MOTION_SIDE_L);
+      bool ok = feederBringUp(MOTION_SIDE_L, feederProbe(MOTION_SIDE_L));
       Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
       Serial.print(ok ? "true" : "false");
       Serial.print(F(",\"ok_l\":"));
       Serial.print(ok ? "true" : "false");
       Serial.println(F("}"));
     } else {
-      bool ok = feederInitNode(MOTION_SIDE_R);
+      bool ok = feederBringUp(MOTION_SIDE_R, feederProbe(MOTION_SIDE_R));
       Serial.print(F("{\"op\":\"feeder_init\",\"ok\":"));
       Serial.print(ok ? "true" : "false");
       Serial.print(F(",\"ok_r\":"));
@@ -1466,6 +1575,10 @@ static void handleSerialLine(char* line) {
   }
   if (strstr(line, "\"op\":\"feed_stage\"")) {
     FeedStageRequest req = feedStageDefaultRequest();
+    if (strstr(line, "\"feed_validate_encoder\"")) {
+      req.checkEncoder = jsonReadBool(line, "feed_validate_encoder", req.checkEncoder);
+      gTune.validateEncoder = req.checkEncoder;
+    }
     if (strstr(line, "\"side\":\"L\"")) req.useR = false;
     else if (strstr(line, "\"side\":\"R\"")) req.useL = false;
     if (strstr(line, "\"mode\":\"clean\"")) {
@@ -1608,8 +1721,8 @@ void setup() {
   initLasersHw();
   modbusBeginHw();
 
-  // Los feeders CAN se inicializan una sola vez al encender Motion.
-  // feederInitBus es idempotente si después llega la orden manual Iniciar.
+  // Los feeders CAN se habilitan al encender Motion. Iniciar desde la HMI
+  // vuelve a recorrer Shutdown → Switch on → Enable.
   (void)feederInitBus();
 
   Serial.println(F("{\"op\":\"boot\",\"mcu\":\"motion\"}"));

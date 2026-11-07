@@ -14,5 +14,8 @@
   "lmguide": {
     "pr_speed_rpm": 3000.0,
     "pos_puu": -4380
+  },
+  "feed_stage": {
+    "validate_encoder": false
   }
 }
