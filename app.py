@@ -14,6 +14,7 @@ from werkzeug.serving import WSGIRequestHandler
 _QUIET_HTTP_LOG_PREFIXES = (
     "/api/motion/status",
     "/api/plc/status",
+    "/api/prefeeder/status",
     "/api/state",
 )
 
@@ -36,7 +37,9 @@ app = Flask(__name__)
 DATA_DIR = Path(__file__).resolve().parent / "data"
 MODELOS_PATH = DATA_DIR / "modelos.json"
 MOTION_PATH = DATA_DIR / "Motion.json"
+PFEEDER_PATH = DATA_DIR / "PreFeeder.json"
 CYCLE_PATH = DATA_DIR / "cycle.json"
+PROD_CYCLE_LOG_PATH = DATA_DIR / "cycle_production.log"
 SERIAL_PATH = DATA_DIR / "serial.json"
 MANT_PATH = DATA_DIR / "mantenimiento.json"
 CHECKLIST_LOG_PATH = DATA_DIR / "checklist.json"
@@ -80,6 +83,7 @@ _serial_cfg = {
     "motion": "",
     "plc": "",
     "andon": "",
+    "prefeeder": "",
     "andon_disabled": False,  # ANDON_SKIP_OPCIONAL — TODO_BORRAR (quitar clave y usos)
     "checklist_bypass": False,
 }
@@ -90,6 +94,8 @@ _CYCLE_CTRL = {
     "thread": None,
     "stop": threading.Event(),
     "pause_after_step": threading.Event(),
+    # Prueba desde Parámetros → Ciclo: un paso, pausa, «Siguiente paso».
+    "step_mode": False,
 }
 
 # Hilo de purga, posición inicial, alimentar un lado y piezas de prueba.
@@ -128,9 +134,13 @@ _LOT = {
     "sides": "R",
 }
 _LAST_PIECE_S = 0.0
+# Marca de fin de la pieza anterior (lote). Tiempo de ciclo en régimen = cadencia entre salidas.
+_PREV_PIECE_END_T: float | None = None
 # Longitud ya medida de la pieza que se está cortando. El soplo la usa
 # aunque el paso 3 del ciclo siguiente termine durante el regreso a home.
 _PIECE_BLOWER_MM = None
+# Lectura de encoder L/R de la pieza en curso (no se pisa con el solape).
+_PIECE_FEED = {"R": None, "L": None}
 
 # Siguiente ciclo arrancado al soltar pinzas (paso 7).
 # Los pasos 1 a 3 pueden terminar mientras el eje sigue hacia home.
@@ -141,12 +151,15 @@ _OVERLAP = {
     "on": False,
     "feed_sent": False,
     "feed_done": False,
+    "post_enc_reset_done": False,
     "holder_error": "",
     "holder_ready": threading.Event(),
     "feed": None,
     "blower_mm": None,
     "t0": None,
     "feed_error": False,
+    "feed_task_started": False,
+    "feed_t0": None,
 }
 # El siguiente paso 4 solo cierra: home ya está hecho y las pinzas siguen abiertas.
 _STEP4_CLOSES = False
@@ -157,15 +170,182 @@ CYCLE_STEPS = (
     {"id": "1", "label": "Start — inicio de secuencia", "actor": "coordinator"},
     {"id": "2", "label": "Holder dual + encoder dual", "actor": "plc"},
     {"id": "3", "label": "Alimentación y medición L/R", "actor": "motion"},
-    {"id": "4", "label": "Pinzas — liberar holder/encoder", "actor": "plc"},
+    {"id": "4", "label": "Pinzas — liberar holder", "actor": "plc"},
     {"id": "5", "label": "LM Guide — posición de corte", "actor": "motion"},
     {"id": "6", "label": "Corte R/L", "actor": "plc"},
     {"id": "7", "label": "Descarga de pieza", "actor": "motion+plc"},
     {"id": "8", "label": "Home LM Guide + blower", "actor": "motion+plc"},
 )
 
+# ── Registro de producción (una línea por operación; no sustituye [Motion]/[PLC]) ──
+_LOT_SEQ = 0
+_PROD_CADENCE_SAMPLES: list[float] = []
+_PROD_LOG_LOCK = threading.Lock()
+_PROD_CTX = {"piece": 1, "step_id": "1", "t0": 0.0}
+_PROD_STEP_DESC = {
+    "1": "Configuración inicial",
+    "2": "Holder + encoder",
+    "3": "Alimentación L/R",
+    "4": "Pinzas — liberar holder",
+    "5": "LM Guide — corte",
+    "6": "Corte R/L",
+    "7": "Descarga de pieza",
+    "8": "Regreso Home + blower",
+}
+
+
+def _prod_lot_tag() -> str:
+    """LOTE = piezas totales del pedido (cantidad), no un contador secuencial de arranques."""
+    if _LOT.get("active"):
+        total = int(_LOT.get("cycles_total") or 0)
+    else:
+        total = int(_MACHINE_STATE.get("cantidad") or 0)
+    return f"LOTE {max(total, 0):03d}"
+
+
+def _prod_piece_tag(piece: int | None = None, total: int | None = None) -> str:
+    """PIEZA = realizadas/totales (durante el paso, la pieza en curso cuenta como realizada)."""
+    if total is None:
+        if _LOT.get("active"):
+            total = int(_LOT["cycles_total"] or 0)
+        else:
+            total = int(_MACHINE_STATE.get("cantidad") or 0)
+        total = max(total, 1)
+    if piece is None:
+        piece = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
+    piece = max(0, min(int(piece), int(total)))
+    return f"PIEZA {piece:03d}/{total:03d}"
+
+
+def _prod_actor(step_id: str) -> str:
+    _, meta = _cycle_step_meta(step_id)
+    if not meta:
+        return "MOTION"
+    actor = str(meta.get("actor") or "motion").lower()
+    if actor == "coordinator":
+        return "MOTION"
+    if actor == "plc":
+        return "PLC"
+    if actor == "motion":
+        return "MOTION"
+    if "+" in actor or "motion" in actor and "plc" in actor:
+        return "PLC+MOTION"
+    return actor.upper()
+
+
+def _prod_write(line: str) -> None:
+    with _PROD_LOG_LOCK:
+        PROD_CYCLE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with PROD_CYCLE_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    print(f"[PROD] {line}", flush=True)
+    _push_event(line, "prod")
+
+
+def _prod_enc_mm(feed: dict | None, side: str) -> str:
+    block = (feed or {}).get(side)
+    if not isinstance(block, dict) or block.get("mm") is None:
+        return "-"
+    try:
+        return f"{float(block['mm']):.2f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _prod_enc_tag(feed: dict | None = None) -> str:
+    src = feed if feed is not None else _PIECE_FEED
+    return f"ENC R={_prod_enc_mm(src, 'R')} mm L={_prod_enc_mm(src, 'L')} mm"
+
+
+def _prod_log_op(
+    step_id: str,
+    duration_s: float,
+    *,
+    piece: int | None = None,
+    parallel: bool = False,
+    status: str = "OK",
+    detail: str = "",
+    feed: dict | None = None,
+) -> None:
+    total = int(_LOT["cycles_total"] or 1) if _LOT.get("active") else 1
+    if piece is None:
+        piece = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
+    try:
+        step_no = f"STEP {int(step_id):02d}"
+    except (TypeError, ValueError):
+        step_no = f"STEP {step_id or '?'}"
+    desc = _PROD_STEP_DESC.get(str(step_id), str(step_id or "?"))
+    actor = _prod_actor(step_id)
+    flag = status if status not in ("OK",) else ("PARALLEL" if parallel else "OK")
+    line = (
+        f"{_prod_lot_tag()} | {_prod_piece_tag(piece, total)} | {step_no} | {desc} | "
+        f"{actor} | {duration_s:.3f} s | {flag}"
+    )
+    if detail and flag == "ERROR":
+        line += f" | {detail}"
+    if step_id == "3" and flag in ("OK", "PARALLEL"):
+        line += f" | {_prod_enc_tag(feed)}"
+    _prod_write(line)
+
+
+def _prod_log_complete(duration_s: float, kind: str) -> None:
+    piece = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
+    total = int(_LOT["cycles_total"] or piece) if _LOT.get("active") else 1
+    line = (
+        f"{_prod_lot_tag()} | {_prod_piece_tag(piece, total)} | COMPLETE | "
+        f"{duration_s:.3f} s | {kind} | {_prod_enc_tag()}"
+    )
+    _prod_write(line)
+
+
+def _prod_log_summary(done: int, total: int, avg_cadence: float) -> None:
+    line = (
+        f"{_prod_lot_tag()} | SUMMARY | {done}/{total} | "
+        f"AVG CADENCE: {avg_cadence:.3f} s"
+    )
+    _prod_write(line)
+
+
+def _prod_log_error(code: str, mensaje: str) -> None:
+    """Registra error de producción; alimentación en paralelo usa pieza/paso del solape."""
+    detail = mensaje or code
+    if (
+        _OVERLAP.get("on")
+        and _OVERLAP.get("feed_sent")
+        and not _OVERLAP.get("feed_done")
+    ):
+        piece = int(_LOT["cycles_done"]) + 2
+        step_id = "3"
+        t0 = float(_OVERLAP.get("feed_t0") or time.perf_counter())
+        dt = max(0.0, time.perf_counter() - t0)
+        parallel = True
+    elif _cycle_thread_alive():
+        piece = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
+        with _STATE_LOCK:
+            step_id = str(_MACHINE_STATE.get("ciclo_paso_id") or "?")
+        ctx = _PROD_CTX
+        t0 = float(ctx.get("t0") or time.perf_counter())
+        dt = max(0.0, time.perf_counter() - t0)
+        parallel = bool(ctx.get("parallel"))
+    else:
+        ctx = _PROD_CTX
+        step_id = str(ctx.get("step_id") or "?")
+        t0 = float(ctx.get("t0") or time.perf_counter())
+        dt = max(0.0, time.perf_counter() - t0)
+        piece = int(ctx.get("piece") or 1)
+        parallel = bool(ctx.get("parallel"))
+    _prod_log_op(
+        step_id,
+        dt,
+        piece=piece,
+        parallel=parallel,
+        status="ERROR",
+        detail=detail,
+    )
+
 _DEFAULT_CYCLE_PARAMS = {
     "ms_holder_enc_stable": 100,
+    "ms_after_feed": 100,
     "ms_lm_at_cut": 100,
     "ms_lm_at_discharge": 100,
     "ms_cutter_on": 50,
@@ -183,6 +363,9 @@ _DEFAULT_CYCLE_PARAMS = {
     "blower_ms_per_mm": 8.0,
     "blower_ms_min": 200,
 }
+
+# Persistidos en cycle.json junto al ciclo (no son tiempos del orquestador).
+_HMI_CYCLE_EXTRA_KEYS = ("cantidad", "numero_modelo")
 
 # Estado inicial (orquestador + UI)
 _MACHINE_STATE = {
@@ -208,7 +391,6 @@ _MACHINE_STATE = {
     "rutina": "",
     "rutina_fase": "",
     "rutina_manos": False,
-    "carga_material": False,
     "omitir_holgura_l": False,
     "omitir_holgura_r": False,
     "ciclos_mant": 0,
@@ -308,6 +490,76 @@ def _load_motion_tune():
         data = json.load(f)
     return _canonical_motion_tune(data)
 
+
+def _canonical_prefeeder_side(src: dict, side: str) -> dict:
+    src = src if isinstance(src, dict) else {}
+    defaults = {
+        "L": {
+            "rpm": 60.0,
+            "settle_ms": 150,
+            "on_s": 2.0,
+            "off_fault_s": 5.0,
+            "stall_fault_s": 2.0,
+            "servo_us": 800,
+        },
+        "R": {
+            "rpm": 60.0,
+            "settle_ms": 150,
+            "on_s": 2.0,
+            "off_fault_s": 5.0,
+            "stall_fault_s": 2.0,
+            "servo_us": 2000,
+        },
+    }[side]
+    block = src.get(side) if isinstance(src.get(side), dict) else {}
+    return {
+        "rpm": _as_float(block, ("rpm",), defaults["rpm"]),
+        "settle_ms": _as_int(block, ("settle_ms",), defaults["settle_ms"]),
+        "on_s": _as_float(block, ("on_s",), defaults["on_s"]),
+        "off_fault_s": _as_float(block, ("off_fault_s",), defaults["off_fault_s"]),
+        "stall_fault_s": _as_float(block, ("stall_fault_s",), defaults["stall_fault_s"]),
+        "servo_us": _as_int(block, ("servo_us",), defaults["servo_us"]),
+    }
+
+
+def _canonical_prefeeder_tune(src):
+    src = src if isinstance(src, dict) else {}
+    return {
+        "L": _canonical_prefeeder_side(src, "L"),
+        "R": _canonical_prefeeder_side(src, "R"),
+    }
+
+
+def _save_prefeeder_tune(tune: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PFEEDER_PATH.write_text(
+        json.dumps(tune, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _load_prefeeder_tune():
+    if not PFEEDER_PATH.exists():
+        tune = _canonical_prefeeder_tune({})
+        _save_prefeeder_tune(tune)
+        return tune
+    with PFEEDER_PATH.open(encoding="utf-8") as f:
+        data = json.load(f)
+    return _canonical_prefeeder_tune(data)
+
+
+def _prefeeder_cfg_signature(side_cfg: dict) -> tuple:
+    c = side_cfg
+    return (
+        round(c["rpm"], 2),
+        c["settle_ms"],
+        round(c["on_s"], 3),
+        round(c["off_fault_s"], 3),
+        round(c["stall_fault_s"], 3),
+        c["servo_us"],
+    )
+
+
 # Datos de ciclo en ESP32 (NVS); la app los empuja con set_data / modelo.
 _MOTION_DATA = {
     "target_length_mm": None,
@@ -359,9 +611,22 @@ def _feed_sides_of(params: dict) -> str:
     return "R"
 
 
-def _cut_mm_of(length: float, params: dict) -> float:
-    """Corte de la LM Guide: largo de pieza − 55 mm + offset."""
-    return abs(length) - LMGUIDE_PIECE_OFFSET_MM + _num(params.get("cut_offset_mm"), 0.0)
+def _measure_comp_mm() -> float:
+    """Compensación de medición (= offset de corte LM Guide). Fuente única: pantalla principal."""
+    with _STATE_LOCK:
+        return _num(_MACHINE_STATE.get("compensacion_medicion_mm"), 0.0)
+
+
+def _mirror_comp_to_cycle_json(mm: float) -> None:
+    """Mantiene cut_offset_mm en cycle.json alineado (mismo valor, solo compatibilidad)."""
+    _ = mm
+    _save_hmi_cycle_extras()
+
+
+def _cut_mm_of(length: float, params: dict | None = None) -> float:
+    """Corte LM Guide: |largo| − 55 mm + compensación de medición."""
+    _ = params  # cycle.json cut_offset_mm obsoleto; misma magnitud que compensación.
+    return abs(length) - LMGUIDE_PIECE_OFFSET_MM + _measure_comp_mm()
 
 
 def _clear_of(deposit: float, clearance: float) -> float:
@@ -528,10 +793,11 @@ def _build_motion_lines(op: str, tune: dict, body: dict):
     if op == "set_tune":
         return tune, [tune_line]
     if op == "encoder_reset":
-        side = str(body.get("side") or "R").upper()
-        if side not in ("R", "L"):
-            raise ValueError("El reset del encoder pide lado R o L.")
-        return tune, [_compact({"op": "encoder_reset", "side": side})]
+        side = str(body.get("side") or "").strip().upper()
+        if side in ("R", "L"):
+            return tune, [_compact({"op": "encoder_reset", "side": side})]
+        # Sin lado / both / LR: firmware resetea R y L.
+        return tune, [_compact({"op": "encoder_reset"})]
     if op == "feeder_init":
         return tune, [tune_line, '{"op":"feeder_init","side":"both"}']
     if op == "motion_hw_init":
@@ -591,15 +857,21 @@ def _build_motion_lines(op: str, tune: dict, body: dict):
     raise ValueError("Orden Motion no reconocida.")
 
 
+# Firmware: PARAM_LM_MOVE_DONE_TIMEOUT_MS (45s) × PARAM_LM_MOVE_MAX_ATTEMPTS (1).
+# Margen corto sobre el timeout del drive; si se corta antes, aparece un falso E043.
+_MOTION_LM_MOVE_TIMEOUT_S = 50.0
+_MOTION_STATUS_TIMEOUT_S = 3.0
+
+
 def _reply_wait_s(line: str) -> float:
-    if "lmguide_home" in line:
-        return 90.0
-    if "lmguide_move" in line:
-        return 95.0
+    if "lmguide_home" in line or "lmguide_move" in line:
+        return _MOTION_LM_MOVE_TIMEOUT_S
     if "motion_hw_init" in line:
-        return 120.0
+        return 55.0
     if "feeder_init" in line or "lmguide_servo_on" in line:
         return 8.0
+    if '"op":"status"' in line:
+        return _MOTION_STATUS_TIMEOUT_S
     return 2.0
 
 
@@ -607,6 +879,7 @@ def _load_serial_cfg() -> None:
     motion = os.environ.get("MOTION_SERIAL", "").strip()
     plc = os.environ.get("PLC_SERIAL", "").strip()
     andon = os.environ.get("ANDON_SERIAL", "").strip()
+    prefeeder = os.environ.get("PREFEEDER_SERIAL", "").strip()
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR ---
     andon_disabled = False
     checklist_bypass = False
@@ -619,6 +892,7 @@ def _load_serial_cfg() -> None:
             motion = str(saved.get("motion") or "").strip()
             plc = str(saved.get("plc") or "").strip()
             andon = str(saved.get("andon") or "").strip()
+            prefeeder = str(saved.get("prefeeder") or "").strip()
             andon_disabled = bool(saved.get("andon_disabled"))
             checklist_bypass = bool(saved.get("checklist_bypass"))
     if andon_disabled:
@@ -627,6 +901,7 @@ def _load_serial_cfg() -> None:
         _serial_cfg["motion"] = motion
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
+        _serial_cfg["prefeeder"] = prefeeder
         _serial_cfg["andon_disabled"] = andon_disabled
         _serial_cfg["checklist_bypass"] = checklist_bypass
     # --- fin ANDON_SKIP_OPCIONAL (_load_serial_cfg) ---
@@ -684,6 +959,27 @@ def _close_andon_serial() -> None:
         _andon_attempted = ""
 
 
+def _close_prefeeder_serial() -> None:
+    global _prefeeder_serial
+    with _prefeeder_serial_lock:
+        if _prefeeder_serial is not None:
+            try:
+                _prefeeder_serial.close()
+            except Exception:
+                pass
+            _prefeeder_serial = None
+
+
+def _invalidate_serial_handle(ser) -> None:
+    """Cierra un handle que Windows dejó zombie tras Monitor Serial / desconexión USB."""
+    if ser is None:
+        return
+    try:
+        ser.close()
+    except Exception:
+        pass
+
+
 def _list_com_ports() -> list[dict]:
     try:
         from serial.tools import list_ports
@@ -715,6 +1011,7 @@ def _save_serial_cfg(
     andon: str,
     andon_disabled: bool,
     checklist_bypass: bool,
+    prefeeder: str | None = None,
 ) -> None:
     """Guarda serial.json. Parámetro andon_disabled: ANDON_SKIP_OPCIONAL — TODO_BORRAR."""
     motion = str(motion or "").strip()
@@ -725,13 +1022,19 @@ def _save_serial_cfg(
         andon = ""
     # ---
     with _serial_cfg_lock:
+        if prefeeder is None:
+            prefeeder = str(_serial_cfg.get("prefeeder") or "").strip()
+        else:
+            prefeeder = str(prefeeder or "").strip()
         prev_motion = _serial_cfg["motion"]
         prev_plc = _serial_cfg["plc"]
         prev_andon = _serial_cfg["andon"]
+        prev_pf = str(_serial_cfg.get("prefeeder") or "").strip()
         prev_ad = bool(_serial_cfg.get("andon_disabled"))
         _serial_cfg["motion"] = motion
         _serial_cfg["plc"] = plc
         _serial_cfg["andon"] = andon
+        _serial_cfg["prefeeder"] = prefeeder
         _serial_cfg["andon_disabled"] = bool(andon_disabled)
         _serial_cfg["checklist_bypass"] = bool(checklist_bypass)
     SERIAL_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -742,6 +1045,7 @@ def _save_serial_cfg(
                 "motion": motion,
                 "plc": plc,
                 "andon": andon,
+                "prefeeder": prefeeder,
                 "andon_disabled": bool(andon_disabled),
                 "checklist_bypass": bool(checklist_bypass),
             },
@@ -757,6 +1061,10 @@ def _save_serial_cfg(
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR: la condición incluye prev_ad ---
     if andon != prev_andon or bool(andon_disabled) != prev_ad:
         _close_andon_serial()
+    if prefeeder != prev_pf:
+        _close_prefeeder_serial()
+        _pf_pushed_signature["L"] = None
+        _pf_pushed_signature["R"] = None
 
 
 def _serial_rx_flush(ser) -> None:
@@ -806,24 +1114,57 @@ def _read_lines_until_op(
     """Lee líneas completas hasta la respuesta pedida, conservando las intermedias.
 
     inject() corre con el candado de escritura: None sigue esperando, [] no
-    escribe, una lista se manda una sola vez. Si esa lista salió, también se
-    espera su feed_stage: el regreso a home puede contestar antes o después.
+    escribe, una lista se manda una sola vez. La orden principal (p. ej.
+    lmguide_move) no espera feed_stage: la alimentación en paralelo se recolecta
+    aparte para no detener home del ciclo en curso.
     """
     out: list[str] = []
     seen: set[str] = set()
     injected = False
-    wait_also = None
     deadline = time.time() + max(0.05, budget_s)
+    abort_drain_until = 0.0
+
+    def _consume(line: str) -> bool:
+        """True si ya tenemos la respuesta pedida (y no falta feed_stage del solape)."""
+        if not line:
+            return False
+        out.append(line)
+        if trace_prefix:
+            print(f"{trace_prefix} {line}", flush=True)
+        try:
+            msg = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        op = msg.get("op")
+        if op:
+            seen.add(op)
+            if on_line is not None:
+                on_line(msg)
+        if want_op not in seen:
+            return False
+        overlap_feed_pending = (
+            inject is not None
+            and _OVERLAP.get("on")
+            and _OVERLAP.get("feed_sent")
+            and not _OVERLAP.get("feed_done")
+            and "feed_stage" not in seen
+        )
+        return not overlap_feed_pending
+
     while time.time() < deadline and len(out) < max_lines:
-        if inject is not None and _cycle_should_stop():
-            break
-        if inject is not None and not injected:
+        if _cycle_should_abort():
+            # Drenar ~0.4 s lo ya encolado: un paro urgente puede hacer que el
+            # Motion responda just en ese momento; no declarar E043 en seco.
+            if abort_drain_until <= 0.0:
+                abort_drain_until = time.time() + 0.4
+            if time.time() >= abort_drain_until:
+                break
+        if inject is not None and not injected and not _cycle_should_abort():
             with _motion_write_lock:
                 extra = inject()
                 if extra is not None:
                     injected = True
                     if extra:
-                        wait_also = "feed_stage"
                         for line in extra:
                             print(f"[Motion TX] {line}", flush=True)
                             ser.write((line + "\n").encode("ascii", "replace"))
@@ -834,25 +1175,14 @@ def _read_lines_until_op(
         rem = deadline - time.time()
         if rem <= 0:
             break
+        if abort_drain_until > 0.0:
+            rem = min(rem, max(0.02, abort_drain_until - time.time()))
         slice_s = 0.15 if (inject is not None and not injected) else min(2.0, rem)
         line = _read_serial_line(ser, min(slice_s, rem))
+        if _consume(line):
+            break
         if not line:
             time.sleep(0.02)
-            continue
-        out.append(line)
-        if trace_prefix:
-            print(f"{trace_prefix} {line}", flush=True)
-        try:
-            msg = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
-            continue
-        op = msg.get("op")
-        if op:
-            seen.add(op)
-            if on_line is not None:
-                on_line(msg)
-        if want_op in seen and (wait_also is None or wait_also in seen):
-            break
     return out
 
 
@@ -862,6 +1192,18 @@ _andon_serial = None
 _andon_serial_lock = threading.Lock()
 _andon_state_sent = ""
 _andon_attempted = ""
+_prefeeder_serial = None
+_prefeeder_serial_lock = threading.Lock()
+_pf_pushed_signature: dict[str, tuple | None] = {"L": None, "R": None}
+_pf_last_fault_sig: tuple[str, ...] = ()
+_PF_CACHED_STATUS: dict | None = None
+_PF_ERROR_LATCH = False
+_PF_STABILIZE_TIMEOUT_S = 45.0
+_PF_SERIAL_REPLY_S = 6.0
+_PF_SOFT_ERRORS = frozenset({"E090", "E091", "E092", "E099"})
+_PF_MANUAL_HOLD = {"L": False, "R": False}
+_PF_MANUAL_HOLD_LOCK = threading.Lock()
+_PF_UI_REFRESH_AT = 0.0
 _PLC_VALVES = ("holder", "encoder", "cutter_r", "cutter_l", "gripper")
 # Estado lógico reportado por el MCU (gLogical) tras cada pulso KEEP/RES.
 _PLC_VALVE_STATUS_KEYS = {
@@ -933,6 +1275,9 @@ def _send_plc_serial(lines):
                     if reply:
                         replies.append(reply)
     except Exception as exc:
+        with _plc_serial_lock:
+            _invalidate_serial_handle(_plc_serial)
+            _plc_serial = None
         return {"sent": False, "reason": str(exc), "replies": replies}
     return {"sent": True, "reason": "", "replies": replies}
 
@@ -994,8 +1339,608 @@ def _send_andon_serial(lines):
                     if reply:
                         replies.append(reply)
     except Exception as exc:
+        with _andon_serial_lock:
+            _invalidate_serial_handle(_andon_serial)
+            _andon_serial = None
         return {"sent": False, "reason": str(exc), "replies": replies}
     return {"sent": True, "reason": "", "replies": replies}
+
+
+def _open_prefeeder_serial_unlocked(port: str):
+    """Abre el COM del PreFeeder. Caller debe tener _prefeeder_serial_lock."""
+    import serial
+
+    global _prefeeder_serial
+    _invalidate_serial_handle(_prefeeder_serial)
+    _prefeeder_serial = None
+    ser = serial.Serial()
+    ser.port = port
+    ser.baudrate = 115200
+    ser.timeout = 0.05
+    ser.write_timeout = 2
+    # Evitar reset por DTR al abrir (el Monitor Serial sí suele resetear).
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    # Tras cerrar el Monitor, Windows/USB-UART a veces necesita un instante.
+    time.sleep(0.25)
+    _serial_rx_flush(ser)
+    _prefeeder_serial = ser
+    return ser
+
+
+def _send_prefeeder_serial(lines, *, force_reopen: bool = False):
+    port = _serial_port("prefeeder")
+    if not port:
+        return {
+            "sent": False,
+            "reason": "Sin puerto del PreAlimentador. Elígelo en Parámetros, pestaña Conexión.",
+            "replies": [],
+        }
+    try:
+        import serial  # noqa: F401
+    except ImportError:
+        return {
+            "sent": False,
+            "reason": "Falta pyserial para abrir el puerto.",
+            "replies": [],
+        }
+
+    replies = []
+    global _prefeeder_serial
+    try:
+        with _prefeeder_serial_lock:
+            need_open = (
+                force_reopen
+                or _prefeeder_serial is None
+                or not _prefeeder_serial.is_open
+                or getattr(_prefeeder_serial, "port", None) != port
+            )
+            if need_open:
+                ser = _open_prefeeder_serial_unlocked(port)
+            else:
+                ser = _prefeeder_serial
+            for line in lines:
+                ser.write((line + "\n").encode("ascii", "replace"))
+                ser.flush()
+                try:
+                    expected_op = str(json.loads(line).get("op") or "")
+                except (TypeError, json.JSONDecodeError):
+                    expected_op = ""
+                if expected_op:
+                    replies.extend(
+                        _read_lines_until_op(ser, expected_op, _PF_SERIAL_REPLY_S)
+                    )
+                else:
+                    reply = _read_serial_line(ser, _PF_SERIAL_REPLY_S)
+                    if reply:
+                        replies.append(reply)
+    except Exception as exc:
+        # Handle zombie: Access denied / dispositivo desconectado tras el Monitor.
+        with _prefeeder_serial_lock:
+            _invalidate_serial_handle(_prefeeder_serial)
+            _prefeeder_serial = None
+        return {"sent": False, "reason": str(exc), "replies": replies}
+    return {"sent": True, "reason": "", "replies": replies}
+
+
+def _prefeeder_status_from_replies(replies):
+    for raw in reversed(replies or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == "status" and msg.get("mcu") == "prefeeder":
+            return msg
+    return None
+
+
+def _prefeeder_status_get() -> dict | None:
+    """Pide status; si el COM quedó mudo (p. ej. tras Monitor Serial), reabre el puerto."""
+    for attempt in range(3):
+        # Intento 0: handle actual. 1 y 2: forzar reopen (caso típico tras
+        # cerrar el Monitor Serial en Windows: is_open=True pero sin RX/TX).
+        sent = _send_prefeeder_serial(
+            ['{"op":"status"}'], force_reopen=(attempt > 0)
+        )
+        if not sent.get("sent"):
+            if attempt < 2:
+                time.sleep(0.35)
+            continue
+        st = _prefeeder_status_from_replies(sent.get("replies"))
+        if st:
+            return st
+        # Envió OK pero sin status: handle zombie o MCU reiniciando por DTR.
+        if attempt < 2:
+            _close_prefeeder_serial()
+            time.sleep(0.35)
+    return None
+
+
+def _prefeeder_active_errors(status: dict | None) -> list[dict]:
+    if not status:
+        return []
+    items = []
+    for code in error_codes.prefeeder_fault_codes(status):
+        items.append({"code": code, "message": error_codes.format_message(code)})
+    return items
+
+
+def _prefeeder_cfg_from_status_side(st: dict | None, side: str) -> dict | None:
+    if not isinstance(st, dict):
+        return None
+    block = st.get(side)
+    if not isinstance(block, dict):
+        return None
+    cfg = block.get("cfg")
+    if not isinstance(cfg, dict):
+        return None
+    return _canonical_prefeeder_side({side: cfg}, side)
+
+
+def _prefeeder_reconcile_pushed_from_status(st: dict | None) -> None:
+    """Alinea la caché de envío con el cfg real del maestro."""
+    if not isinstance(st, dict):
+        return
+    for side in ("L", "R"):
+        live = _prefeeder_cfg_from_status_side(st, side)
+        if live is not None:
+            _pf_pushed_signature[side] = _prefeeder_cfg_signature(live)
+
+
+def _prefeeder_set_config_side(side: str, cfg: dict) -> tuple[bool, bool]:
+    """Envía set_config al maestro solo si la firma cambió. Retorna (ok, changed)."""
+    side = side.upper()
+    if side not in ("L", "R"):
+        return False, False
+    canonical = _canonical_prefeeder_side({side: cfg}, side)
+    sig = _prefeeder_cfg_signature(canonical)
+    if _pf_pushed_signature.get(side) == sig:
+        return True, False
+    payload = {"op": "set_config", "side": side, **canonical}
+    sent = _send_prefeeder_serial([_compact(payload)])
+    if not sent.get("sent"):
+        return False, False
+    changed = False
+    ok = False
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == "set_config" and str(msg.get("side") or "").upper() == side:
+            ok = bool(msg.get("ok", False))
+            changed = bool(msg.get("changed", False))
+            break
+    if ok and (changed or _pf_pushed_signature.get(side) is None):
+        _pf_pushed_signature[side] = sig
+    return ok, changed
+
+
+def _prefeeder_adopt_live_config() -> None:
+    """Alinea archivo/firma con el cfg del maestro (NVS). No sobrescribe el ESP32."""
+    if not _serial_port("prefeeder"):
+        return
+    st = _prefeeder_refresh_cache()
+    if not st:
+        return
+    try:
+        tune = _load_prefeeder_tune()
+    except (OSError, json.JSONDecodeError):
+        tune = _canonical_prefeeder_tune({})
+    changed = False
+    for side in ("L", "R"):
+        live = _prefeeder_cfg_from_status_side(st, side)
+        if live is None:
+            continue
+        if _prefeeder_cfg_signature(tune[side]) != _prefeeder_cfg_signature(live):
+            tune[side] = live
+            changed = True
+    if changed:
+        try:
+            _save_prefeeder_tune(tune)
+        except OSError:
+            pass
+
+
+def _prefeeder_required() -> bool:
+    return bool(_serial_port("prefeeder"))
+
+
+def _prefeeder_cmd(payload: dict) -> dict:
+    return _send_prefeeder_serial([_compact(payload)])
+
+
+def _prefeeder_reply_ok(sent: dict, op: str) -> bool:
+    if not sent.get("sent"):
+        return False
+    for raw in reversed(sent.get("replies") or []):
+        try:
+            msg = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if msg.get("op") == op:
+            return bool(msg.get("ok", True))
+    return False
+
+
+def _prefeeder_set_feed_lock(locked: bool) -> bool:
+    return _prefeeder_reply_ok(
+        _prefeeder_cmd({"op": "set_feed_lock", "locked": bool(locked)}),
+        "set_feed_lock",
+    )
+
+
+def _prefeeder_set_force(side: str, on: bool) -> bool:
+    side = str(side or "").upper()
+    if side not in ("L", "R"):
+        return False
+    return _prefeeder_reply_ok(
+        _prefeeder_cmd({"op": "set_force_feed", "side": side, "on": bool(on)}),
+        "set_force_feed",
+    )
+
+
+def _prefeeder_set_omit(side: str, on: bool) -> bool:
+    side = str(side or "").upper()
+    if side not in ("L", "R"):
+        return False
+    return _prefeeder_reply_ok(
+        _prefeeder_cmd({"op": "set_omit", "side": side, "on": bool(on)}),
+        "set_omit",
+    )
+
+
+def _prefeeder_sync_omit_flags() -> None:
+    if not _prefeeder_required():
+        return
+    with _STATE_LOCK:
+        ol = bool(_MACHINE_STATE.get("omitir_holgura_l"))
+        or_ = bool(_MACHINE_STATE.get("omitir_holgura_r"))
+    _prefeeder_set_omit("L", ol)
+    _prefeeder_set_omit("R", or_)
+
+
+def _prefeeder_status_ready(status: dict | None) -> bool:
+    if not status:
+        return False
+    if not status.get("ready"):
+        return False
+    return not error_codes.prefeeder_fault_codes(status)
+
+
+def _prefeeder_stop_now() -> None:
+    """Frena alimentación manual y bloquea de inmediato."""
+    if not _prefeeder_required():
+        return
+    _prefeeder_set_force("L", False)
+    _prefeeder_set_force("R", False)
+    _prefeeder_set_feed_lock(True)
+    _prefeeder_refresh_cache()
+
+
+def _prefeeder_refresh_cache() -> dict | None:
+    global _PF_CACHED_STATUS
+    st = _prefeeder_status_get()
+    if st:
+        _PF_CACHED_STATUS = st
+        _prefeeder_reconcile_pushed_from_status(st)
+    return st
+
+
+def _prefeeder_comm_active() -> bool:
+    """Poll al maestro si hay COM (evita banner ‘sin enlace’ por no consultar en idle)."""
+    if not _serial_port("prefeeder"):
+        return False
+    return True
+
+
+def _prefeeder_fault_sig(st: dict | None) -> tuple[str, ...]:
+    return tuple(sorted(error_codes.prefeeder_fault_codes(st)))
+
+
+def _machine_fault_message(codes: tuple[str, ...]) -> tuple[str, str]:
+    primary = codes[0]
+    if len(codes) == 1:
+        return primary, error_codes.format_message(primary)
+    msg = " · ".join(error_codes.format_message(c) for c in codes)
+    return primary, msg
+
+
+def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None) -> None:
+    """Un solo evento al entrar en error; luego solo actualiza el banner."""
+    with _STATE_LOCK:
+        in_error = _MACHINE_STATE.get("estado") == "error"
+        if en_curso is None:
+            en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+    if in_error:
+        with _STATE_LOCK:
+            stale = _MACHINE_STATE.get("mensaje") != msg or _MACHINE_STATE.get("ciclo_error") != primary
+        if stale:
+            _set_machine_ui(mensaje=msg, ciclo_error=primary)
+        return
+    _push_event(msg, "error")
+    _set_machine_ui(
+        estado="error",
+        estado_label="Error",
+        mensaje=msg,
+        ciclo_error=primary,
+        en_curso=en_curso,
+    )
+
+
+def _prefeeder_maybe_clear_idle_error() -> None:
+    """Si el PreFeeder ya no tiene falla y no hay ciclo, quita el error del banner."""
+    with _STATE_LOCK:
+        if _MACHINE_STATE.get("ciclo_en_curso") or _MACHINE_STATE.get("rutina"):
+            return
+        if _MACHINE_STATE.get("estado") != "error":
+            return
+        code = str(_MACHINE_STATE.get("ciclo_error") or "").strip()
+        if code and not code.startswith("E09"):
+            return
+    _set_machine_ui(
+        estado="idle",
+        estado_label="En espera",
+        ciclo_error="",
+        mensaje="Sistema listo. Sin errores activos.",
+    )
+
+
+def _prefeeder_raise_fault(sig: tuple[str, ...]) -> None:
+    if not sig:
+        return
+    primary, msg = _machine_fault_message(sig)
+    with _STATE_LOCK:
+        active = (
+            bool(_MACHINE_STATE.get("ciclo_en_curso"))
+            or _MACHINE_STATE.get("estado") == "running"
+            or bool(_MACHINE_STATE.get("rutina"))
+        )
+    if active:
+        _cycle_fail(primary, mensaje=msg)
+        return
+    _enter_machine_error(primary, msg, en_curso=False)
+
+
+def _prefeeder_drain_pf_fault_lines() -> None:
+    global _PF_ERROR_LATCH
+    if not _serial_port("prefeeder"):
+        return
+    try:
+        with _prefeeder_serial_lock:
+            ser = _prefeeder_serial
+            if ser is None or not ser.is_open:
+                return
+            for _ in range(12):
+                line = _read_serial_line(ser, 0.04)
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line)
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                if msg.get("op") != "pf_fault":
+                    continue
+                _PF_ERROR_LATCH = True
+    except Exception:
+        pass
+
+
+def _prefeeder_watch_once() -> None:
+    global _pf_last_fault_sig, _PF_ERROR_LATCH
+    if not _serial_port("prefeeder"):
+        _pf_last_fault_sig = ()
+        _PF_ERROR_LATCH = False
+        return
+    st = _prefeeder_refresh_cache()
+    _prefeeder_drain_pf_fault_lines()
+    if not st:
+        return
+    sig = _prefeeder_fault_sig(st)
+    with _STATE_LOCK:
+        in_error = _MACHINE_STATE.get("estado") == "error"
+    if sig != _pf_last_fault_sig:
+        if sig:
+            _PF_ERROR_LATCH = True
+            _prefeeder_raise_fault(sig)
+        else:
+            _PF_ERROR_LATCH = False
+            if in_error:
+                _prefeeder_maybe_clear_idle_error()
+        _pf_last_fault_sig = sig
+    elif sig and not in_error:
+        _PF_ERROR_LATCH = True
+        _prefeeder_raise_fault(sig)
+
+
+def _prefeeder_watch_loop() -> None:
+    while True:
+        try:
+            if _prefeeder_required():
+                _prefeeder_watch_once()
+        except Exception:
+            pass
+        time.sleep(0.75)
+
+
+def _prefeeder_stabilize_and_lock() -> tuple[bool, str]:
+    if not _prefeeder_required():
+        return True, ""
+    _prefeeder_set_feed_lock(False)
+    deadline = time.time() + _PF_STABILIZE_TIMEOUT_S
+    stable = False
+    while time.time() < deadline:
+        st = _prefeeder_refresh_cache()
+        if not st:
+            time.sleep(0.3)
+            continue
+        sig = _prefeeder_fault_sig(st)
+        if sig:
+            _prefeeder_set_feed_lock(True)
+            _, msg = _machine_fault_message(sig)
+            return False, msg
+        if st.get("stable"):
+            stable = True
+            break
+        time.sleep(0.3)
+    _prefeeder_set_feed_lock(True)
+    st = _prefeeder_refresh_cache()
+    if not stable and st and st.get("stable"):
+        stable = True
+    if not stable or not _prefeeder_status_ready(st):
+        if not st:
+            return False, error_codes.format_message("E092")
+        return False, error_codes.format_message("E099")
+    return True, ""
+
+
+def _prefeeder_unlock_for_cycle() -> None:
+    global _PF_ERROR_LATCH
+    if _prefeeder_required():
+        _prefeeder_set_feed_lock(False)
+        st = _PF_CACHED_STATUS
+        if st and not _prefeeder_fault_sig(st):
+            _PF_ERROR_LATCH = False
+
+
+def _prefeeder_lock_after_cycle() -> None:
+    if not _prefeeder_required():
+        return
+    ok, msg = _prefeeder_stabilize_and_lock()
+    if not ok:
+        _push_event(msg, "error")
+        _set_machine_ui(mensaje=msg)
+
+
+def _prefeeder_lock_after_cycle_async() -> None:
+    _prefeeder_process_halt_async()
+
+
+def _prefeeder_process_halt(*, stabilize: bool = True) -> None:
+    """Bloquea alimentación; opcionalmente corre estabilización (misma lógica que Iniciar)."""
+    if not _prefeeder_required():
+        return
+    _prefeeder_stop_now()
+    if not stabilize:
+        return
+    st = _PF_CACHED_STATUS
+    if st and _prefeeder_fault_sig(st):
+        return
+    ok, msg = _prefeeder_stabilize_and_lock()
+    _prefeeder_refresh_cache()
+    if not ok:
+        _push_event(msg, "error")
+
+
+def _prefeeder_process_halt_async(*, stabilize: bool = True) -> None:
+    threading.Thread(
+        target=_prefeeder_process_halt, kwargs={"stabilize": stabilize}, daemon=True
+    ).start()
+
+
+def _prefeeder_fault_clear_now() -> bool:
+    """Fallas de campo (cilindro/manguera/holgura). Sin status ≠ falla activa."""
+    if not _prefeeder_required():
+        return True
+    st = _prefeeder_refresh_cache() or _PF_CACHED_STATUS
+    if not st:
+        return True
+    return not error_codes.prefeeder_fault_codes(st)
+
+
+def _error_reset_blocked_message() -> str:
+    """Motivo concreto si el reset no puede validar condiciones físicas."""
+    if _serial_port("plc"):
+        st = _plc_status_get()
+        if st is None:
+            return error_codes.format_message("E019")
+        faults = error_codes.plc_fault_codes(st)
+        if faults:
+            return error_codes.format_message(faults[0])
+    if _serial_port("motion"):
+        mst = _motion_status_get()
+        if mst is None:
+            return error_codes.format_message("E043")
+        if mst.get("safety") is True:
+            return error_codes.format_message("E039")
+    if _prefeeder_required():
+        st = _prefeeder_refresh_cache() or _PF_CACHED_STATUS
+        if st:
+            faults = error_codes.prefeeder_fault_codes(st)
+            if faults:
+                return error_codes.format_message(faults[0])
+    return error_codes.format_message("E046")
+
+
+def _prefeeder_public_summary() -> dict:
+    """Resumen para el HMI (sin consultar COM si no hay caché)."""
+    if not _prefeeder_required():
+        return {
+            "com": False,
+            "ready": None,
+            "stable": None,
+            "feed_lock": None,
+            "label": "Sin puerto COM",
+            "tone": "muted",
+        }
+    st = _PF_CACHED_STATUS
+    if not st:
+        return {
+            "com": True,
+            "ready": False,
+            "stable": False,
+            "feed_lock": True,
+            "label": "Sin enlace al maestro",
+            "tone": "warn",
+        }
+    faults = error_codes.prefeeder_fault_codes(st)
+    ready = bool(st.get("ready"))
+    stable = bool(st.get("stable"))
+    feed_lock = bool(st.get("feed_lock"))
+    if faults:
+        tone = "warn"
+        label = "Bloqueado"
+    elif ready:
+        tone = "ok"
+        label = "Listo (bloqueado)"
+    elif not feed_lock:
+        tone = "active"
+        label = "Desbloqueado — alimentación activa"
+    elif not stable:
+        tone = "warn"
+        label = "Estabilizando…"
+    else:
+        tone = "warn"
+        label = "Bloqueado — pulsa Iniciar"
+    return {
+        "com": True,
+        "ready": ready,
+        "stable": stable,
+        "feed_lock": feed_lock,
+        "label": label,
+        "tone": tone,
+    }
+
+
+def _prefeeder_maybe_refresh_ui() -> None:
+    """Refuerzo en /api/state si el hilo de vigilancia va retrasado."""
+    global _PF_UI_REFRESH_AT
+    if not _prefeeder_required():
+        return
+    now = time.time()
+    if now - _PF_UI_REFRESH_AT < 0.6:
+        return
+    _PF_UI_REFRESH_AT = now
+    _prefeeder_watch_once()
+
+
+def _prefeeder_boot_lock() -> None:
+    time.sleep(0.5)
+    if _prefeeder_required():
+        _prefeeder_set_feed_lock(True)
+        _prefeeder_sync_omit_flags()
+        _prefeeder_adopt_live_config()
 
 
 def _build_plc_line(op: str, body: dict) -> dict:
@@ -1049,6 +1994,8 @@ def _status_module(replies) -> str:
             continue
         if msg.get("mcu") == "motion":
             return "motion"
+        if msg.get("mcu") == "prefeeder":
+            return "prefeeder"
         if msg.get("mcu") == "andon" or (
             "state" in msg and "cutter_r" not in msg and "feeder_r_ready" not in msg
         ):
@@ -1082,6 +2029,18 @@ def _check_module_link(which: str) -> tuple[bool, str]:
         if not _serial_port("andon"):
             return False, missing_port
         sent = _send_andon_serial(['{"op":"status"}'])
+    elif which == "prefeeder":
+        missing_port, wrong, silent = "E090", "E091", "E092"
+        if not _serial_port("prefeeder"):
+            return False, missing_port
+        # Misma recuperación que _prefeeder_status_get: reopen si el Monitor
+        # dejó el COM en un estado donde write “pasa” pero no hay respuesta.
+        st = _prefeeder_status_get()
+        if st and st.get("mcu") == "prefeeder":
+            return True, ""
+        if st:
+            return False, wrong
+        return False, silent
     else:
         return False, "E070"
     if not sent.get("sent"):
@@ -1330,9 +2289,16 @@ def _send_motion_serial(
                     if trace_motion:
                         print(f"[Motion RX] {reply}", flush=True)
     except Exception as exc:
+        # Tras Monitor Serial / USB, el handle puede quedar abierto pero muerto.
+        try:
+            _invalidate_serial_handle(_motion_serial)
+        except Exception:
+            pass
+        _motion_serial = None
         return {"sent": False, "reason": str(exc), "replies": replies}
     finally:
-        _serial_lock.release()
+        if _serial_lock.locked():
+            _serial_lock.release()
     return {"sent": True, "reason": "", "replies": replies}
 
 
@@ -1403,7 +2369,56 @@ def _load_cycle_params():
         for key in params:
             if key in raw:
                 params[key] = raw[key]
+        for key in _HMI_CYCLE_EXTRA_KEYS:
+            if key in raw:
+                params[key] = raw[key]
     return params
+
+
+def _save_hmi_cycle_extras() -> None:
+    """Cantidad, modelo y compensación en cycle.json para sobrevivir al reinicio del HMI."""
+    try:
+        params = _load_cycle_params()
+        params["cut_offset_mm"] = _measure_comp_mm()
+        try:
+            params["cantidad"] = max(1, int(_MACHINE_STATE.get("cantidad") or 1))
+        except (TypeError, ValueError):
+            params["cantidad"] = 1
+        params["numero_modelo"] = str(_MACHINE_STATE.get("numero_modelo") or "").strip()
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        CYCLE_PATH.write_text(
+            json.dumps(params, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _hydrate_hmi_from_cycle() -> None:
+    """Restaura pantalla principal desde cycle.json al arrancar app.py."""
+    params = _load_cycle_params()
+    try:
+        qty = int(params.get("cantidad", 1))
+    except (TypeError, ValueError):
+        qty = 1
+    _MACHINE_STATE["cantidad"] = max(1, qty)
+    comp = _num(params.get("cut_offset_mm"), 0.0)
+    _MACHINE_STATE["compensacion_medicion_mm"] = comp
+    _MOTION_DATA["measure_comp_mm"] = comp
+    _MOTION_DATA["tolerance_mm"] = _num(params.get("tolerance_mm"), 2.0)
+    modelo_id = str(params.get("numero_modelo") or "").strip()
+    if not modelo_id:
+        return
+    try:
+        entry = _find_modelo(modelo_id)
+    except (OSError, json.JSONDecodeError):
+        entry = None
+    if not entry:
+        return
+    _MACHINE_STATE["numero_modelo"] = entry["modelo"]
+    _MACHINE_STATE["longitud_modelo_mm"] = entry.get("longitud_mm")
+    _MOTION_DATA["modelo_id"] = entry["modelo"]
+    _MOTION_DATA["target_length_mm"] = entry.get("longitud_mm")
 
 
 def _cycle_step_meta(step_id: str):
@@ -1432,6 +2447,8 @@ def _push_event(texto: str, tipo: str = "info") -> None:
     entry = {"texto": texto, "tipo": tipo, "hora": _now_hms()}
     with _STATE_LOCK:
         ev = _MACHINE_STATE.setdefault("eventos", [])
+        if ev and tipo == "error" and ev[0].get("tipo") == "error" and ev[0].get("texto") == texto:
+            return
         ev.insert(0, entry)
         del ev[300:]
         _EVENTS_REV += 1
@@ -1507,6 +2524,9 @@ def _public_machine_state() -> dict:
         state["lote_ciclos_hechos"] = int(_LOT["cycles_done"] or 0)
         state["lote_ciclos_total"] = int(_LOT["cycles_total"] or 0)
         state["lote_lados"] = _LOT["sides"]
+        state["feed_sides"] = _feed_sides_of(_load_cycle_params())
+        state["prefeeder"] = _prefeeder_public_summary()
+        state["ciclo_paso_a_paso"] = bool(_CYCLE_CTRL.get("step_mode"))
         return state
 
 
@@ -1561,6 +2581,25 @@ def _cycle_should_stop() -> bool:
     return _CYCLE_CTRL["stop"].is_set()
 
 
+def _cycle_error_active() -> bool:
+    """Error de ciclo mientras el hilo del lote sigue vivo (p. ej. falla PreFeeder en paralelo)."""
+    if not _cycle_thread_alive():
+        return False
+    with _STATE_LOCK:
+        return bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+
+
+def _cycle_should_abort() -> bool:
+    return _cycle_should_stop() or _cycle_error_active()
+
+
+def _cycle_motion_halt_for_error() -> None:
+    if _serial_port("motion"):
+        _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
+    if _serial_port("plc"):
+        _send_plc_serial([_compact({"op": "blower_off"})])
+
+
 def _cycle_thread_alive() -> bool:
     thread = _CYCLE_CTRL["thread"]
     return thread is not None and thread.is_alive()
@@ -1577,18 +2616,18 @@ def _motion_owner_busy() -> str:
 
 
 def _cycle_wait_if_paused() -> bool:
-    """True si hay Stop brusco (abortar de inmediato)."""
-    return _cycle_should_stop()
+    """True si hay Stop brusco o error de ciclo (abortar de inmediato)."""
+    return _cycle_should_abort()
 
 
 def _cycle_sleep_ms(ms: int) -> bool:
-    """True si se completó la espera; False si hubo Stop."""
+    """True si se completó la espera; False si hubo Stop o error."""
     deadline = time.time() + (max(0, int(ms)) / 1000.0)
     while time.time() < deadline:
         if _cycle_wait_if_paused():
             return False
         time.sleep(0.02)
-    return not _cycle_should_stop()
+    return not _cycle_should_abort()
 
 
 def _cycle_plc_send(payload: dict):
@@ -1611,7 +2650,12 @@ def _cycle_motion_send(payload: dict, timeout_s: float = 2.0, inject=None, on_li
 
 def _serial_reply_ok(sent: dict, op: str, fallback: str) -> bool:
     """True si hubo envío y la última respuesta JSON con ese op tiene ok (por defecto True)."""
+    # Si el ciclo ya fue pausado por otro hilo, no reportar falso E043 de COM.
+    if _cycle_error_active():
+        return False
     if not sent.get("sent"):
+        if sent.get("busy"):
+            return False
         _cycle_fail(sent.get("code") or fallback)
         return False
     for raw in reversed(sent.get("replies") or []):
@@ -1624,6 +2668,9 @@ def _serial_reply_ok(sent: dict, op: str, fallback: str) -> bool:
                 _cycle_fail("E044" if op in ("lmguide_move", "lmguide_home", "set_tune", "set_data") else fallback)
                 return False
             return True
+    # Espera cortada por Stop/error: no confundir con COM mudo.
+    if _cycle_should_abort():
+        return False
     _cycle_fail(fallback)
     return False
 
@@ -1631,7 +2678,7 @@ def _serial_reply_ok(sent: dict, op: str, fallback: str) -> bool:
 def _motion_status_get() -> dict | None:
     sent = _send_motion_serial(
         ['{"op":"status"}'],
-        line_timeout_s=90.0,
+        line_timeout_s=_MOTION_STATUS_TIMEOUT_S,
         reply_until_op="status",
     )
     if not sent.get("sent"):
@@ -1759,23 +2806,33 @@ def _cycle_enter_step(step_id: str, step_index: int) -> None:
         nxt = int(_LOT["cycles_done"]) + 2
         total = int(_LOT["cycles_total"])
         msg = msg + f" Ciclo {nxt} de {total} alimenta en paralelo."
-    _set_machine_ui(
+    with _STATE_LOCK:
+        keep_error = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+    ui_kw = dict(
         estado=estado,
         estado_label=elabel,
         mensaje=msg,
         step_id=step_id,
         step_index=step_index,
         en_curso=True,
-        ciclo_error="",
     )
-    _, meta = _cycle_step_meta(step_id)
-    if meta:
-        _push_event(f"Paso {step_id} — {meta['label']}")
+    if not keep_error:
+        ui_kw["ciclo_error"] = ""
+    _set_machine_ui(**ui_kw)
 
 
-def _cycle_fail(code: str, **fmt) -> None:
-    msg = error_codes.format_message(code, **fmt)
-    _push_event(msg, "error")
+def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
+    msg = mensaje if mensaje is not None else error_codes.format_message(code, **fmt)
+    with _STATE_LOCK:
+        in_error = _MACHINE_STATE.get("estado") == "error"
+        had_code = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+    # Si ya hay un error latched, no lo pises con un E043/E000 secundario.
+    if in_error and had_code:
+        return
+    first = not in_error
+    if first:
+        _push_event(msg, "error")
+    # Estado primero: si el log falla, el ciclo igual queda en pausa por error.
     _set_machine_ui(
         estado="error",
         estado_label="Error",
@@ -1783,6 +2840,19 @@ def _cycle_fail(code: str, **fmt) -> None:
         en_curso=True,
         ciclo_error=code,
     )
+    if _MACHINE_STATE.get("ciclo_en_curso") or _cycle_thread_alive():
+        try:
+            _prod_log_error(code, msg)
+        except Exception:
+            pass
+    if _cycle_thread_alive():
+        _cycle_motion_halt_for_error()
+        if _OVERLAP.get("on"):
+            _OVERLAP["feed_error"] = True
+    if _prefeeder_required() and (
+        _MACHINE_STATE.get("ciclo_en_curso") or _MACHINE_STATE.get("estado") == "running"
+    ):
+        _prefeeder_process_halt_async()
 
 
 def _cycle_latch_reset() -> None:
@@ -1799,6 +2869,7 @@ def _cycle_latch_after_completed_index(completed_idx: int) -> None:
     if completed_idx >= 2:
         _CYCLE_LATCH["feed_validated"] = True
     if completed_idx >= 3:
+        # Tras pinzas: solo se libera el holder; el encoder permanece cerrado.
         _CYCLE_LATCH["holder_encoder_active"] = False
         _CYCLE_LATCH["holder_encoder_released"] = True
         _CYCLE_LATCH["gripper_active"] = True
@@ -1838,7 +2909,7 @@ def _cycle_assert_preconditions(step_index: int) -> bool:
             _cycle_fail("E003")
             return False
         ok_hw, code = _plc_confirm(
-            {"gripper": True, "holder": False, "encoder": False}
+            {"gripper": True, "holder": False, "encoder": True}
         )
         if not ok_hw:
             if code:
@@ -1895,7 +2966,11 @@ def _read_feed_stage(sent: dict):
 
 
 def _fail_feed_stage(error_name: str) -> None:
-    err = error_name or "unknown"
+    if _OVERLAP.get("feed_done"):
+        return
+    if _cycle_should_stop():
+        return
+    err = (error_name or "").strip() or "feed_no_reply"
     if err == "ok":
         err = "unknown"
     code = error_codes.feed_stage_code(err)
@@ -1915,12 +2990,43 @@ def _cycle_move_lm_mm(mm: float, inject=None, on_line=None) -> bool:
                 "puu": puu,
                 "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
             },
-            timeout_s=90.0,
+            timeout_s=_MOTION_LM_MOVE_TIMEOUT_S,
             inject=inject,
             on_line=on_line,
         ),
         "E043",
     )
+
+
+def _cycle_lm_home_absolute() -> bool:
+    """Mueve el LM Guide a PUU 0 absoluto (no homing mecánico)."""
+    tune = _load_motion_tune()
+    return _motion_cmd_serial_ok(
+        _cycle_motion_send(
+            {
+                "op": "lmguide_move",
+                "target": "home",
+                "lm_pr_speed_rpm": tune["lmguide"]["pr_speed_rpm"],
+            },
+            timeout_s=_MOTION_LM_MOVE_TIMEOUT_S,
+        ),
+        "E043",
+    )
+
+
+def _cycle_encoder_reset() -> bool:
+    """Pide reset de encoder R+L al Motion. Usar solo con holder/encoder ya cerrados."""
+    return _motion_cmd_serial_ok(
+        _cycle_motion_send({"op": "encoder_reset"}, timeout_s=2.0),
+        "E043",
+    )
+
+
+def _cycle_after_feed_encoder_reset(params: dict) -> bool:
+    """Tras FeedStage: espera de estabilización y segundo reset de encoder."""
+    if not _cycle_sleep_ms(int(params["ms_after_feed"])):
+        return False
+    return _cycle_encoder_reset()
 
 
 def _cycle_run_step(step_id: str, params: dict) -> bool:
@@ -1929,7 +3035,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
         flat = _motion_data_flat(_MOTION_DATA)
         return _motion_cmd_serial_ok(_cycle_motion_send(flat, timeout_s=2.0), "E043")
 
-    # Step 2. Activar holder dual y encoder dual juntos; esperar estabilización.
+    # Step 2. Cerrar holder+encoder, estabilizar, reset encoder (antes de alimentar).
     if step_id == "2":
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": True}), "E019"):
             return False
@@ -1940,9 +3046,9 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             if code:
                 _cycle_fail(code)
             return False
-        return True
+        return _cycle_encoder_reset()
 
-    # Step 3. Alimentar el lado configurado hasta el láser y validar el encoder.
+    # Step 3. Alimentar; al terminar FeedStage, esperar y resetear encoder otra vez.
     if step_id == "3":
         sides = _run_sides()
         if not _motion_cmd_serial_ok(_push_saved_motion_tune(), "E043"):
@@ -1956,23 +3062,24 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             _cycle_fail(sent.get("code") or "E043")
             return False
         if not found or not ok:
-            _fail_feed_stage(error_name)
+            _fail_feed_stage(error_name if found else "feed_no_reply")
             return False
         _set_machine_ui(feed=feed)
-        global _PIECE_BLOWER_MM
+        global _PIECE_BLOWER_MM, _PIECE_FEED
         _PIECE_BLOWER_MM = _feed_dict_length_mm(feed)
-        return True
+        _PIECE_FEED = {"R": feed.get("R"), "L": feed.get("L")}
+        return _cycle_after_feed_encoder_reset(params)
 
-    # Step 4. Activar pinzas; desactivar holder y encoder; esperar.
+    # Step 4. Activar pinzas; liberar holder; encoder permanece cerrado.
     if step_id == "4":
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True}), "E019"):
             return False
-        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": False}), "E019"):
+        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder", "on": False}), "E019"):
             return False
         if not _cycle_sleep_ms(int(params["ms_after_grip_release"])):
             return False
         ok_hw, code = _plc_confirm(
-            {"gripper": True, "holder": False, "encoder": False}
+            {"gripper": True, "holder": False, "encoder": True}
         )
         if not ok_hw:
             if code:
@@ -2068,7 +3175,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             feed_inject, feed_line = _overlap_feed_hook()
             home_result["sent"] = _cycle_motion_send(
                 {"op": "lmguide_move", "target": "home"},
-                timeout_s=90.0,
+                timeout_s=_MOTION_LM_MOVE_TIMEOUT_S,
                 inject=feed_inject,
                 on_line=feed_line,
             )
@@ -2095,17 +3202,10 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         home_sent = home_result.get("sent") or {}
         replies = home_sent.get("replies") or []
-        feed_failed = bool(_OVERLAP["feed_error"])
-        if _OVERLAP["feed_sent"] and not _OVERLAP["feed_done"]:
-            if _replies_have_op(replies, "feed_stage"):
-                if not _overlap_accept_feed(replies):
-                    feed_failed = True
-            elif not _OVERLAP["feed_error"]:
-                _OVERLAP["feed_sent"] = False
+        _overlap_ensure_feed_collected(replies, budget_s=4.0)
         home_ok = _motion_cmd_serial_ok(home_sent, "E043")
         if home_ok and _OVERLAP["on"] and not _OVERLAP["feed_done"] and not _OVERLAP["feed_sent"]:
-            if not _overlap_feed_after_home():
-                feed_failed = True
+            _overlap_start_feed_task()
         if not home_ok:
             return False
 
@@ -2115,6 +3215,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             if _cycle_wait_if_paused():
                 _cycle_plc_send({"op": "blower_off"})
                 return False
+            _overlap_poll_feed(0.15)
             mst = _motion_status_get()
             if mst and mst.get("lm_homed") is True:
                 home_confirmed = True
@@ -2129,8 +3230,11 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             if _cycle_wait_if_paused():
                 _cycle_plc_send({"op": "blower_off"})
                 return False
+            _overlap_poll_feed(0.15)
+            if not _OVERLAP["feed_sent"] and _OVERLAP["on"] and not _OVERLAP["feed_done"]:
+                _overlap_start_feed_task()
             time.sleep(0.05)
-        if feed_failed:
+        if _OVERLAP["feed_error"]:
             return False
         return True
 
@@ -2139,6 +3243,8 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
 
 def _next_piece_follows() -> bool:
     """Hay otra pieza del lote después de la que se está cerrando."""
+    if _CYCLE_CTRL.get("step_mode"):
+        return False
     if not _LOT["active"] or _LOT["tray_wait"]:
         return False
     done_after = int(_LOT["cycles_done"]) + 1
@@ -2155,11 +3261,13 @@ def _overlap_reset() -> None:
     _OVERLAP["on"] = False
     _OVERLAP["feed_sent"] = False
     _OVERLAP["feed_done"] = False
+    _OVERLAP["post_enc_reset_done"] = False
     _OVERLAP["holder_error"] = ""
     _OVERLAP["feed"] = None
     _OVERLAP["blower_mm"] = None
     _OVERLAP["t0"] = None
     _OVERLAP["feed_error"] = False
+    _OVERLAP["feed_task_started"] = False
     _OVERLAP["holder_ready"].clear()
     global _STEP4_CLOSES
     _STEP4_CLOSES = False
@@ -2184,8 +3292,10 @@ def _overlap_start_holder(params: dict) -> None:
     gen = int(_OVERLAP["gen"])
 
     def run() -> None:
-        if _OVERLAP["gen"] != gen or _cycle_should_stop():
+        if _OVERLAP["gen"] != gen or _cycle_should_abort():
             return
+        t_holder = time.perf_counter()
+        nxt = int(_LOT["cycles_done"]) + 2
         _set_machine_ui(paralelo_id="2")
         sent = _cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": True})
         if _OVERLAP["gen"] != gen:
@@ -2204,7 +3314,20 @@ def _overlap_start_holder(params: dict) -> None:
             if code:
                 _OVERLAP["holder_error"] = code
             return
+        # Holder/encoder cerrados: reset antes de alimentar (mismo orden que el paso 2).
+        sent_enc = _cycle_motion_send({"op": "encoder_reset"}, timeout_s=2.0)
+        if _OVERLAP["gen"] != gen:
+            return
+        if not _motion_cmd_ok(sent_enc, "encoder_reset"):
+            _OVERLAP["holder_error"] = sent_enc.get("code") or "E043"
+            return
         _OVERLAP["holder_ready"].set()
+        _prod_log_op(
+            "2",
+            time.perf_counter() - t_holder,
+            piece=nxt,
+            parallel=True,
+        )
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -2213,6 +3336,7 @@ def _overlap_arm(params: dict) -> bool:
     """Paso 1 del siguiente ciclo: datos y ajuste. El holder sale en paralelo."""
     if _OVERLAP["on"] or _OVERLAP["feed_done"]:
         return True
+    t_arm = time.perf_counter()
     if not _motion_cmd_serial_ok(
         _cycle_motion_send(_motion_data_flat(_MOTION_DATA), timeout_s=2.0),
         "E043",
@@ -2224,10 +3348,12 @@ def _overlap_arm(params: dict) -> bool:
     _OVERLAP["t0"] = time.time()
     _OVERLAP["feed_sent"] = False
     _OVERLAP["feed_done"] = False
+    _OVERLAP["post_enc_reset_done"] = False
     _OVERLAP["holder_error"] = ""
     _OVERLAP["feed"] = None
     _OVERLAP["blower_mm"] = None
     _OVERLAP["feed_error"] = False
+    _OVERLAP["feed_task_started"] = False
     _OVERLAP["holder_ready"].clear()
     nxt = int(_LOT["cycles_done"]) + 2
     total = int(_LOT["cycles_total"])
@@ -2239,6 +3365,12 @@ def _overlap_arm(params: dict) -> bool:
         ),
     )
     _push_event(f"Ciclo {nxt} de {total}: paso 1 en paralelo con la descarga.")
+    _prod_log_op(
+        "1",
+        time.perf_counter() - t_arm,
+        piece=nxt,
+        parallel=True,
+    )
     _overlap_start_holder(params)
     return True
 
@@ -2267,11 +3399,12 @@ def _overlap_feed_inject():
     """None sigue esperando al holder. [] no escribe. Una lista se manda una vez."""
     if not _OVERLAP["on"] or _OVERLAP["feed_done"] or _OVERLAP["feed_sent"]:
         return []
-    if _cycle_should_stop() or _OVERLAP["holder_error"]:
+    if _cycle_should_abort() or _OVERLAP["holder_error"]:
         return []
     if not _OVERLAP["holder_ready"].is_set():
         return None
     _OVERLAP["feed_sent"] = True
+    _OVERLAP["feed_t0"] = time.perf_counter()
     nxt = int(_LOT["cycles_done"]) + 2
     total = int(_LOT["cycles_total"])
     _set_machine_ui(
@@ -2296,13 +3429,15 @@ def _replies_have_op(replies, op: str) -> bool:
 
 
 def _overlap_accept_feed(replies) -> bool:
+    if _OVERLAP["feed_done"]:
+        return True
     found, ok, error_name, feed = _read_feed_stage({"replies": replies})
     if _cycle_should_stop() and (not found or not ok):
         return False
     if not found or not ok:
         _OVERLAP["feed_error"] = True
         if not _MACHINE_STATE.get("ciclo_error"):
-            _fail_feed_stage(error_name if found else "")
+            _fail_feed_stage(error_name if found else "feed_no_reply")
         return False
     _OVERLAP["feed_done"] = True
     _OVERLAP["feed"] = feed
@@ -2311,13 +3446,75 @@ def _overlap_accept_feed(replies) -> bool:
     nxt = int(_LOT["cycles_done"]) + 2
     total = int(_LOT["cycles_total"])
     _push_event(f"Ciclo {nxt} de {total}: pasos 1 a 3 listos.")
+    t0 = _OVERLAP.get("feed_t0")
+    if t0 is not None:
+        _prod_log_op(
+            "3",
+            time.perf_counter() - float(t0),
+            piece=nxt,
+            parallel=True,
+            feed=feed,
+        )
     return True
 
 
-def _overlap_feed_after_home() -> bool:
-    """El home ya terminó y el holder no alcanzó a cruzarse con ese movimiento."""
+def _motion_drain_replies(
+    want_op: str, budget_s: float, *, blocking: bool = True
+) -> list[str]:
+    """Lee respuestas pendientes en Motion sin enviar órdenes nuevas."""
+    port = _serial_port("motion")
+    if not port:
+        return []
+    try:
+        import serial
+    except ImportError:
+        return []
+    global _motion_serial
+    wait_s = max(0.05, min(budget_s, 5.0))
+    if blocking:
+        if not _serial_lock.acquire(timeout=wait_s):
+            return []
+    elif not _serial_lock.acquire(blocking=False):
+        return []
+    try:
+        ser = _motion_serial
+        if ser is None or not ser.is_open or getattr(ser, "port", None) != port:
+            return []
+        return _read_lines_until_op(ser, want_op, budget_s, trace_prefix=None)
+    finally:
+        _serial_lock.release()
+
+
+def _overlap_try_accept_from_replies(replies) -> None:
     if _OVERLAP["feed_done"]:
-        return True
+        return
+    if replies and _replies_have_op(replies, "feed_stage"):
+        _overlap_accept_feed(replies)
+
+
+def _overlap_poll_feed(budget_s: float = 0.35) -> None:
+    if not _OVERLAP["on"] or _OVERLAP["feed_done"] or not _OVERLAP["feed_sent"]:
+        return
+    lines = _motion_drain_replies("feed_stage", budget_s, blocking=budget_s >= 0.35)
+    if lines:
+        _overlap_accept_feed(lines)
+
+
+def _overlap_ensure_feed_collected(replies, budget_s: float = 3.0) -> None:
+    """Recolecta feed_stage si la respuesta llegó tras lmguide_move/home."""
+    if not _OVERLAP["on"] or _OVERLAP["feed_done"]:
+        return
+    _overlap_try_accept_from_replies(replies)
+    if _OVERLAP["feed_done"]:
+        return
+    if _OVERLAP["feed_sent"]:
+        _overlap_poll_feed(budget_s)
+
+
+def _overlap_send_feed_blocking() -> bool:
+    """Envía feed_stage y procesa respuesta (hilo o espera antes del paso 4)."""
+    if _OVERLAP["feed_done"]:
+        return _overlap_post_feed_encoder_reset()
     if _cycle_should_stop():
         return False
     if _OVERLAP["holder_error"] and not _OVERLAP["holder_ready"].is_set():
@@ -2328,7 +3525,13 @@ def _overlap_feed_after_home() -> bool:
             return False
         _cycle_fail(_OVERLAP["holder_error"] or "E010")
         return False
+    if _OVERLAP["feed_sent"]:
+        _overlap_poll_feed(2.0)
+        if not _OVERLAP["feed_done"]:
+            return False
+        return _overlap_post_feed_encoder_reset()
     _OVERLAP["feed_sent"] = True
+    _OVERLAP["feed_t0"] = time.perf_counter()
     _set_machine_ui(paralelo_id="3")
     sides = _run_sides()
     payload = _feed_stage_payload(sides if sides in ("R", "L") else None)
@@ -2338,14 +3541,96 @@ def _overlap_feed_after_home() -> bool:
     if not sent.get("sent"):
         _cycle_fail(sent.get("code") or "E043")
         return False
-    return _overlap_accept_feed(sent.get("replies") or [])
+    if not _overlap_accept_feed(sent.get("replies") or []):
+        return False
+    return _overlap_post_feed_encoder_reset()
+
+
+def _overlap_start_feed_task() -> None:
+    """Alimentación del siguiente ciclo sin bloquear el paso 8 en curso."""
+    if (
+        not _OVERLAP["on"]
+        or _OVERLAP["feed_done"]
+        or _OVERLAP["feed_sent"]
+        or _OVERLAP["feed_task_started"]
+    ):
+        return
+    _OVERLAP["feed_task_started"] = True
+    gen = int(_OVERLAP["gen"])
+
+    def run() -> None:
+        try:
+            if _OVERLAP["gen"] != gen or _cycle_should_stop():
+                return
+            _overlap_send_feed_blocking()
+        finally:
+            if not _OVERLAP["feed_sent"] and not _OVERLAP["feed_done"]:
+                _OVERLAP["feed_task_started"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _overlap_post_feed_encoder_reset() -> bool:
+    """Tras FeedStage en paralelo: espera ms_after_feed y resetea encoder (una vez)."""
+    if _OVERLAP.get("post_enc_reset_done"):
+        return True
+    if not _cycle_after_feed_encoder_reset(_load_cycle_params()):
+        return False
+    _OVERLAP["post_enc_reset_done"] = True
+    return True
+
+
+def _overlap_wait_feed_done(timeout_s: float = 120.0) -> bool:
+    """Espera la alimentación solapada antes de entregar el paso 4 al siguiente ciclo."""
+    if not _OVERLAP["on"]:
+        return True
+    if _OVERLAP["feed_error"]:
+        return False
+    if _OVERLAP["feed_done"]:
+        return _overlap_post_feed_encoder_reset()
+    total = int(_LOT["cycles_total"])
+    nxt = int(_LOT["cycles_done"]) + 1
+    _set_machine_ui(
+        estado="running",
+        estado_label="Ciclo en marcha",
+        mensaje=(
+            _cycle_piece_prefix()
+            + f"Pieza {nxt} de {total}: esperando alimentación (paso 3 en paralelo)…"
+        ),
+        en_curso=True,
+    )
+    if not _OVERLAP["feed_sent"] and not _OVERLAP["feed_task_started"]:
+        _overlap_start_feed_task()
+    deadline = time.time() + timeout_s
+    blocking_after = time.time() + 0.75
+    while time.time() < deadline:
+        if _cycle_should_abort():
+            return False
+        if _OVERLAP["feed_done"]:
+            return _overlap_post_feed_encoder_reset()
+        if _OVERLAP["feed_error"]:
+            return False
+        _overlap_poll_feed(1.0)
+        if not _OVERLAP["feed_done"] and not _OVERLAP["feed_sent"]:
+            if not _OVERLAP["feed_task_started"]:
+                _overlap_start_feed_task()
+            elif time.time() >= blocking_after:
+                if not _overlap_send_feed_blocking():
+                    if _OVERLAP["feed_error"] or _MACHINE_STATE.get("ciclo_error"):
+                        return False
+                    if _cycle_should_abort():
+                        return False
+                blocking_after = time.time() + 2.0
+        time.sleep(0.05)
+    _cycle_fail("E038", detail="feed_overlap_timeout")
+    return False
 
 
 def _overlap_handoff() -> tuple[int, float | None]:
     """Paso 8 ya acabó (home, pinzas abiertas) y los pasos 1 a 3 también."""
     if not _OVERLAP["feed_done"]:
         return 0, None
-    global _PIECE_BLOWER_MM, _STEP4_CLOSES
+    global _PIECE_BLOWER_MM, _PIECE_FEED, _STEP4_CLOSES
     mm = _OVERLAP["blower_mm"]
     t0 = _OVERLAP["t0"]
     feed = _OVERLAP["feed"]
@@ -2354,6 +3639,7 @@ def _overlap_handoff() -> tuple[int, float | None]:
     if mm is not None:
         _PIECE_BLOWER_MM = mm
     if feed is not None:
+        _PIECE_FEED = {"R": feed.get("R"), "L": feed.get("L")}
         _set_machine_ui(feed=feed)
     _push_event("Home con pinzas abiertas. El paso 4 cierra y sigue.")
     return 3, t0
@@ -2364,6 +3650,7 @@ def _finish_piece_idle(mensaje: str) -> None:
     _LOT["active"] = False
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
+    _CYCLE_CTRL["step_mode"] = False
     _set_machine_ui(
         estado="idle",
         estado_label="En espera",
@@ -2379,6 +3666,7 @@ def _finish_piece_idle(mensaje: str) -> None:
     )
     _overlap_reset()
     _cycle_latch_reset()
+    _prefeeder_lock_after_cycle_async()
 
 
 def _enter_tray_wait(deposits: int) -> None:
@@ -2408,7 +3696,10 @@ def _home_after_tray() -> bool:
         mensaje="Charola vacía. Regresando el eje a cero.",
         en_curso=True,
     )
-    sent = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=90.0)
+    sent = _cycle_motion_send(
+        {"op": "lmguide_move", "target": "home"},
+        timeout_s=_MOTION_LM_MOVE_TIMEOUT_S,
+    )
     if _motion_cmd_serial_ok(sent, "E043"):
         return True
     _LOT["tray_wait"] = True
@@ -2434,64 +3725,113 @@ def _piece_log_name() -> str:
 
 
 def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
-    global _LAST_PIECE_S
+    global _LAST_PIECE_S, _PREV_PIECE_END_T, _PROD_CTX
     params = _load_cycle_params()
-    t0 = started_at if started_at else time.time()
-    fresh = start_index <= 0
+    regime = bool(started_at is not None and start_index > 0 and _PREV_PIECE_END_T is not None)
+    if regime:
+        tick0 = _PREV_PIECE_END_T
+    else:
+        tick0 = time.time()
+    fresh = start_index <= 0 and not regime
+    piece_num = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
     name = _piece_log_name()
     if fresh:
         _push_event(f"{name} inicia.")
+        # Arranque fresco: primero PUU 0 absoluto. Si el eje quedó a media
+        # carrera tras un abort, no se debe tratar el corte como offset relativo.
+        _set_machine_ui(
+            estado="running",
+            estado_label="Ciclo en marcha",
+            mensaje=_cycle_piece_prefix() + "LM Guide a home (absoluto).",
+            en_curso=True,
+            step_id="1",
+            step_index=0,
+        )
+        if not _cycle_lm_home_absolute():
+            return False
     for idx in range(start_index, len(CYCLE_STEPS)):
         step = CYCLE_STEPS[idx]
-        if _cycle_should_stop():
-            _set_machine_ui(
-                estado="stopped",
-                estado_label="Detenido",
-                mensaje="Stop — detenido en el paso actual.",
-                en_curso=True,
-                step_id=step["id"],
-                step_index=idx,
-            )
-            _push_event("Ciclo detenido (Stop).", "warn")
+        step_id = step["id"]
+        t_step = time.perf_counter()
+        _PROD_CTX = {
+            "piece": piece_num,
+            "step_id": step_id,
+            "t0": t_step,
+            "parallel": False,
+        }
+        if _cycle_should_abort():
             return False
-        _cycle_enter_step(step["id"], idx)
+        _cycle_enter_step(step_id, idx)
         if not _cycle_assert_preconditions(idx):
             return False
-        ok = _cycle_run_step(step["id"], params)
+        ok = _cycle_run_step(step_id, params)
+        if _cycle_error_active():
+            return False
+        step_s = time.perf_counter() - t_step
+        if ok:
+            _prod_log_op(step_id, step_s, piece=piece_num, parallel=False)
+        elif not _MACHINE_STATE.get("ciclo_error"):
+            detail = str(_MACHINE_STATE.get("mensaje") or "falló")
+            _prod_log_op(
+                step_id,
+                step_s,
+                piece=piece_num,
+                status="ERROR",
+                detail=detail,
+            )
         if not ok:
             if _MACHINE_STATE.get("ciclo_error"):
                 return False
-            if _cycle_should_stop():
-                _set_machine_ui(
-                    estado="stopped",
-                    estado_label="Detenido",
-                    mensaje="Stop — detenido en el paso actual.",
-                    en_curso=True,
-                    step_id=step["id"],
-                    step_index=idx,
-                )
-                _push_event("Ciclo detenido (Stop).", "warn")
             return False
         _cycle_latch_mark_step_done(idx)
-        elapsed = time.time() - t0
+        elapsed = time.time() - tick0
         _set_machine_ui(tiempo_corriendo_s=round(elapsed, 1))
         if _CYCLE_CTRL["pause_after_step"].is_set():
             _CYCLE_CTRL["pause_after_step"].clear()
             next_idx = idx + 1
-            next_step = CYCLE_STEPS[next_idx]["id"] if next_idx < len(CYCLE_STEPS) else ""
-            _set_machine_ui(
-                estado="paused",
-                estado_label="Pausa",
-                mensaje="Ciclo en pausa. Reanudar para continuar.",
-                en_curso=True,
-                step_id=next_step,
-                step_index=next_idx,
-            )
-            _push_event("Pausa — paso actual completado.", "warn")
-            return False
-    _LAST_PIECE_S = time.time() - t0
-    if fresh or started_at:
-        _push_event(f"{name} termina en {_LAST_PIECE_S:.1f} s.")
+            # En paso a paso, el último paso cierra la pieza sin pedir otro avance.
+            if next_idx < len(CYCLE_STEPS):
+                next_step = CYCLE_STEPS[next_idx]["id"]
+                step_mode = bool(_CYCLE_CTRL.get("step_mode"))
+                if step_mode:
+                    nxt = CYCLE_STEPS[next_idx]
+                    msg = (
+                        f"Paso {step_id} listo. Siguiente: {nxt['id']} — {nxt['label']}. "
+                        "Pulsa «Siguiente paso»."
+                    )
+                    label = "Paso a paso"
+                    event = f"Paso a paso — paso {step_id} completado."
+                else:
+                    msg = "Ciclo en pausa. Reanudar para continuar."
+                    label = "Pausa"
+                    event = "Pausa — paso actual completado."
+                _set_machine_ui(
+                    estado="paused",
+                    estado_label=label,
+                    mensaje=msg,
+                    en_curso=True,
+                    step_id=next_step,
+                    step_index=next_idx,
+                )
+                _push_event(event, "warn")
+                _prefeeder_process_halt_async()
+                return False
+    t_end = time.time()
+    _LAST_PIECE_S = t_end - tick0
+    _PREV_PIECE_END_T = t_end
+    if regime:
+        kind = "HANDOFF"
+        global _PROD_CADENCE_SAMPLES
+        _PROD_CADENCE_SAMPLES.append(_LAST_PIECE_S)
+    elif fresh:
+        kind = "FIRST"
+    else:
+        kind = "NORMAL"
+        _PROD_CADENCE_SAMPLES.append(_LAST_PIECE_S)
+    _prod_log_complete(_LAST_PIECE_S, kind)
+    if fresh or regime:
+        tag = " (régimen)" if regime else ""
+        _push_event(f"{name} termina en {_LAST_PIECE_S:.1f} s{tag}.")
     else:
         _push_event(f"{name} termina.")
     return True
@@ -2511,27 +3851,32 @@ def _cycle_worker(start_index: int = 0) -> None:
             if not lot_mode:
                 _finish_piece_idle("Ciclo completado. Listo para siguiente Start.")
                 return
-            if _cycle_should_stop() or not _LOT["active"]:
-                if _cycle_should_stop():
-                    _set_machine_ui(
-                        estado="stopped",
-                        estado_label="Detenido",
-                        mensaje="Stop — lote detenido.",
-                        en_curso=False,
-                    )
+            if _cycle_should_abort() or not _LOT["active"]:
                 return
             _LOT["cycles_done"] += 1
             done = _LOT["cycles_done"]
             total = _LOT["cycles_total"]
             deposits = int(_LOT["deposits_per_tray"] or 0)
             if done >= total:
-                _push_event(f"Lote terminado. {done} ciclos.")
-                _finish_piece_idle(f"Lote terminado. {done} ciclos.")
+                avg_cadence = (
+                    sum(_PROD_CADENCE_SAMPLES) / len(_PROD_CADENCE_SAMPLES)
+                    if _PROD_CADENCE_SAMPLES
+                    else 0.0
+                )
+                _prod_log_summary(done, total, avg_cadence)
+                if _CYCLE_CTRL.get("step_mode"):
+                    _push_event("Prueba paso a paso terminada.")
+                    _finish_piece_idle("Prueba paso a paso terminada.")
+                else:
+                    _push_event(f"Lote terminado. {done} ciclos.")
+                    _finish_piece_idle(f"Lote terminado. {done} ciclos.")
                 return
             if deposits and done % deposits == 0:
                 _enter_tray_wait(deposits)
                 return
             _cycle_latch_reset()
+            if not _overlap_wait_feed_done():
+                return
             index, started_at = _overlap_handoff()
             if index == 0:
                 _set_machine_ui(
@@ -2546,23 +3891,45 @@ def _cycle_worker(start_index: int = 0) -> None:
                     tiempo_corriendo_s=0,
                     paralelo_id="",
                 )
+    except Exception as exc:
+        _cycle_motion_halt_for_error()
+        if not _cycle_error_active():
+            _cycle_fail(
+                "E000",
+                mensaje=f"Ciclo abortado por excepción interna: {exc}",
+            )
     finally:
+        stop_req = _cycle_should_stop()
         _CYCLE_CTRL["pause_after_step"].clear()
         _CYCLE_CTRL["stop"].clear()
         _CYCLE_CTRL["thread"] = None
+        if stop_req:
+            _CYCLE_CTRL["step_mode"] = False
+            _cycle_stop_idle()
+        else:
+            # Si el hilo murió sin Stop ni error latched, no dejar «en proceso» fantasma.
+            with _STATE_LOCK:
+                stuck_running = (
+                    bool(_MACHINE_STATE.get("ciclo_en_curso"))
+                    and _MACHINE_STATE.get("estado") == "running"
+                    and not str(_MACHINE_STATE.get("ciclo_error") or "").strip()
+                )
+            if stuck_running:
+                _cycle_fail(
+                    "E043",
+                    mensaje="Ciclo detenido sin respuesta del Motion. Revisa COM o el firmware.",
+                )
 
 
 def _cycle_blocked_by_routine() -> str:
     if not _checklist_bypassed() and not (_MACHINE_STATE.get("checklist") or {}).get("ok"):
         return "Completa la revisión de arranque antes de Iniciar."
-    if _MACHINE_STATE.get("carga_material"):
-        return "Apaga la carga de material antes de Iniciar."
     if _MACHINE_STATE.get("rutina") == "purga":
         return "Hay una purga en curso."
     return _motion_owner_busy()
 
 
-def _cycle_start() -> tuple[bool, str]:
+def _cycle_start(*, step_mode: bool = False) -> tuple[bool, str]:
     blocked = _cycle_blocked_by_routine()
     if blocked:
         return False, blocked
@@ -2577,9 +3944,16 @@ def _cycle_start() -> tuple[bool, str]:
         return False, "Selecciona un modelo con longitud antes de Start."
     params = _load_cycle_params()
     sides = _feed_sides_of(params)
-    cycles, qty_err = _order_cycles(_MACHINE_STATE.get("cantidad"), sides)
+    if step_mode:
+        # Una sola pieza: con ambos lados basta cantidad 2 para validar el pedido.
+        qty = 2 if sides == "LR" else 1
+        cycles, qty_err = _order_cycles(qty, sides)
+    else:
+        cycles, qty_err = _order_cycles(_MACHINE_STATE.get("cantidad"), sides)
     if qty_err:
         return False, qty_err
+    if step_mode:
+        cycles = 1
     plan, plan_err = _tray_plan(length, params)
     if plan_err:
         return False, plan_err
@@ -2589,8 +3963,19 @@ def _cycle_start() -> tuple[bool, str]:
     ready, motion_err = _motion_ready_for_cycle()
     if not ready:
         return False, motion_err
-    _announce_trays(cycles, plan)
+    if _prefeeder_required():
+        st = _prefeeder_refresh_cache()
+        if not st:
+            return False, error_codes.format_message("E092")
+        if not _prefeeder_status_ready(st):
+            return False, error_codes.format_message("E099")
+    if not step_mode:
+        _announce_trays(cycles, plan)
+    global _LOT_SEQ, _PROD_CADENCE_SAMPLES
+    _LOT_SEQ += 1
+    _PROD_CADENCE_SAMPLES = []
     _LOT["active"] = True
+    _LOT["log_id"] = _LOT_SEQ
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
     _LOT["cycles_total"] = cycles
@@ -2604,13 +3989,29 @@ def _cycle_start() -> tuple[bool, str]:
     _LOT["clearance_mm"] = plan["clearance_mm"]
     _LOT["sides"] = sides
     _CYCLE_CTRL["stop"].clear()
-    _CYCLE_CTRL["pause_after_step"].clear()
+    _CYCLE_CTRL["step_mode"] = bool(step_mode)
+    if step_mode:
+        _CYCLE_CTRL["pause_after_step"].set()
+    else:
+        _CYCLE_CTRL["pause_after_step"].clear()
     _overlap_reset()
     _cycle_latch_reset()
+    global _PREV_PIECE_END_T
+    _PREV_PIECE_END_T = None
+    if step_mode:
+        ui_estado = "running"
+        ui_label = "Paso a paso"
+        ui_msg = "Prueba paso a paso — ejecutando paso 1."
+        event_msg = "Prueba paso a paso iniciada."
+    else:
+        ui_estado = "running"
+        ui_label = "Ciclo en marcha"
+        ui_msg = "Secuencia automática iniciada."
+        event_msg = None
     _set_machine_ui(
-        estado="running",
-        estado_label="Ciclo en marcha",
-        mensaje="Secuencia automática iniciada.",
+        estado=ui_estado,
+        estado_label=ui_label,
+        mensaje=ui_msg,
         en_curso=True,
         ciclo_error="",
         feed={"R": None, "L": None},
@@ -2623,6 +4024,9 @@ def _cycle_start() -> tuple[bool, str]:
     th = threading.Thread(target=_cycle_worker, args=(0,), daemon=True)
     _CYCLE_CTRL["thread"] = th
     th.start()
+    _prefeeder_unlock_for_cycle()
+    if event_msg:
+        _push_event(event_msg)
     return True, ""
 
 
@@ -2636,7 +4040,7 @@ def _cycle_pause() -> None:
     _CYCLE_CTRL["pause_after_step"].set()
     _set_machine_ui(
         estado="running",
-        estado_label="Ciclo en marcha",
+        estado_label="Paso a paso" if _CYCLE_CTRL.get("step_mode") else "Ciclo en marcha",
         mensaje="Pausa solicitada. Terminando el paso en curso…",
     )
     _push_event("Pausa solicitada — se detendrá al completar el paso.", "warn")
@@ -2649,8 +4053,6 @@ def _cycle_resume() -> tuple[bool, str]:
         return False, "Hay un error activo. Usa Reset cuando la condición se haya corregido."
     if _MACHINE_STATE.get("rutina") == "purga":
         return False, "Hay una purga en curso."
-    if _MACHINE_STATE.get("carga_material"):
-        return False, "Apaga la carga de material antes de reanudar."
     busy = _motion_owner_busy()
     if busy:
         return False, busy
@@ -2662,14 +4064,57 @@ def _cycle_resume() -> tuple[bool, str]:
         return False, link_err
     if idx >= len(CYCLE_STEPS):
         idx = len(CYCLE_STEPS) - 1
+    step_mode = bool(_CYCLE_CTRL.get("step_mode"))
     _CYCLE_CTRL["stop"].clear()
-    _CYCLE_CTRL["pause_after_step"].clear()
+    if step_mode:
+        _CYCLE_CTRL["pause_after_step"].set()
+    else:
+        _CYCLE_CTRL["pause_after_step"].clear()
     th = threading.Thread(target=_cycle_worker, args=(idx,), daemon=True)
     _CYCLE_CTRL["thread"] = th
     th.start()
-    _set_machine_ui(estado="running", estado_label="Ciclo en marcha", mensaje="Reanudando secuencia.")
-    _push_event("Ciclo reanudado.")
+    _prefeeder_unlock_for_cycle()
+    if step_mode:
+        step = CYCLE_STEPS[idx] if 0 <= idx < len(CYCLE_STEPS) else None
+        sid = step["id"] if step else "?"
+        label = step["label"] if step else ""
+        _set_machine_ui(
+            estado="running",
+            estado_label="Paso a paso",
+            mensaje=f"Ejecutando paso {sid}" + (f" — {label}." if label else "."),
+        )
+        _push_event(f"Paso a paso — ejecutando paso {sid}.")
+    else:
+        _set_machine_ui(estado="running", estado_label="Ciclo en marcha", mensaje="Reanudando secuencia.")
+        _push_event("Ciclo reanudado.")
     return True, ""
+
+
+def _cycle_step_start() -> tuple[bool, str]:
+    """Inicia una pieza en modo prueba: pausa al completar cada paso."""
+    if _cycle_thread_alive() or _MACHINE_STATE.get("ciclo_en_curso"):
+        return False, "Hay un ciclo en curso. Deténlo antes de la prueba paso a paso."
+    ok, err = _cycle_start(step_mode=True)
+    if not ok:
+        return False, err
+    return True, "Prueba paso a paso iniciada."
+
+
+def _cycle_step_next() -> tuple[bool, str]:
+    """Avanza un paso en la prueba paso a paso (equivalente a Reanudar con pausa armada)."""
+    if not _CYCLE_CTRL.get("step_mode"):
+        return False, "No hay una prueba paso a paso activa."
+    if _MACHINE_STATE.get("estado") != "paused" or not _MACHINE_STATE.get("ciclo_en_curso"):
+        return False, "Espera a que termine el paso en curso."
+    idx = int(_MACHINE_STATE.get("ciclo_paso_indice") or 0)
+    if idx >= len(CYCLE_STEPS):
+        _CYCLE_CTRL["step_mode"] = False
+        _finish_piece_idle("Prueba paso a paso terminada.")
+        return True, "Prueba paso a paso terminada."
+    ok, err = _cycle_resume()
+    if not ok:
+        return False, err
+    return True, "Siguiente paso."
 
 
 def _charola_vacia(_data=None) -> tuple[bool, str]:
@@ -2695,41 +4140,61 @@ def _charola_vacia(_data=None) -> tuple[bool, str]:
     th = threading.Thread(target=_cycle_worker, args=(0,), daemon=True)
     _CYCLE_CTRL["thread"] = th
     th.start()
+    _prefeeder_unlock_for_cycle()
     return True, "Charola vacía. El eje vuelve a cero y el siguiente corte sale del primer montón."
 
 
+def _cycle_stop_idle(mensaje: str = "Stop — ciclo detenido. Listo para Iniciar.") -> None:
+    global _STEP4_CLOSES
+    _STEP4_CLOSES = False
+    _LOT["active"] = False
+    _LOT["tray_wait"] = False
+    _LOT["home_before"] = False
+    _CYCLE_CTRL["step_mode"] = False
+    _overlap_reset()
+    _cycle_latch_reset()
+    _set_machine_ui(
+        estado="idle",
+        estado_label="En espera",
+        mensaje=mensaje,
+        en_curso=False,
+        ciclo_error="",
+        step_id="",
+        step_index=0,
+        progreso_pct=0,
+        tiempo_corriendo_s=0,
+        paralelo_id="",
+        feed={"R": None, "L": None},
+    )
+
+
 def _cycle_stop() -> None:
-    was_tray = bool(_LOT["tray_wait"])
     running = bool(_CYCLE_CTRL["thread"] and _CYCLE_CTRL["thread"].is_alive())
     _LOT["active"] = False
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
     _CYCLE_CTRL["stop"].set()
-    _overlap_reset()
     _CYCLE_CTRL["pause_after_step"].clear()
+    _CYCLE_CTRL["step_mode"] = False
     _ROUTINE["stop"].set()
     if _serial_port("motion"):
         _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
     if _serial_port("plc"):
         _send_plc_serial([_compact({"op": "blower_off"})])
-    if was_tray and not running:
-        _set_machine_ui(
-            estado="stopped",
-            estado_label="Detenido",
-            mensaje="Stop — lote detenido.",
-            en_curso=False,
-            step_id="",
-            step_index=0,
-        )
-    elif _MACHINE_STATE.get("estado") in ("running", "error") or _MACHINE_STATE.get("rutina"):
-        _set_machine_ui(mensaje="Stop — deteniendo de inmediato…")
     if _MACHINE_STATE.get("rutina") == "purga" and not (
         _ROUTINE["thread"] and _ROUTINE["thread"].is_alive()
     ):
         _purga_finish(True)
-    if not running:
+    _cycle_stop_idle()
+    if _prefeeder_required():
+        _prefeeder_stop_now()
+    _push_event("Stop — ciclo abortado.", "warn")
+    if running:
+        th = _CYCLE_CTRL.get("thread")
+        if th is not None:
+            th.join(timeout=2.0)
+    else:
         _CYCLE_CTRL["stop"].clear()
-    _push_event("Stop solicitado — detención inmediata.", "warn")
 
 
 def _error_physical_clear_now() -> bool:
@@ -2748,6 +4213,8 @@ def _error_physical_clear_now() -> bool:
             return False
         if mst.get("safety") is True:
             return False
+    if not _prefeeder_fault_clear_now():
+        return False
     return True
 
 
@@ -2770,10 +4237,41 @@ def _wait_error_physical_clear_stable() -> bool:
 
 
 def _cycle_reset_error() -> tuple[bool, str]:
-    if not _MACHINE_STATE.get("ciclo_error"):
+    global _pf_last_fault_sig, _PF_ERROR_LATCH
+    with _STATE_LOCK:
+        code = str(_MACHINE_STATE.get("ciclo_error") or "").strip()
+        in_err = _MACHINE_STATE.get("estado") == "error" or bool(code)
+    if not in_err:
+        return True, ""
+    # Pulso GPIO Reset PLC (borrar fallos) antes de validar condiciones físicas.
+    if _serial_port("plc"):
+        sent = _cycle_plc_send({"op": "reset"})
+        if not sent.get("sent"):
+            return False, error_codes.format_message(sent.get("code") or "E019")
+        _plc_wait_ready(1.5)
+    if not code and _MACHINE_STATE.get("estado") == "error":
+        _pf_last_fault_sig = ()
+        _PF_ERROR_LATCH = False
+        _set_machine_ui(
+            estado="idle",
+            estado_label="En espera",
+            ciclo_error="",
+            mensaje="Sistema listo. Sin errores activos.",
+        )
+        _push_event("Reset — PLC fallos borrados.")
         return True, ""
     if not _wait_error_physical_clear_stable():
-        return False, error_codes.format_message("E046")
+        return False, _error_reset_blocked_message()
+    if _prefeeder_required():
+        _prefeeder_stop_now()
+        if code not in _PF_SOFT_ERRORS:
+            ok_pf, msg_pf = _prefeeder_stabilize_and_lock()
+            if not ok_pf:
+                return False, msg_pf
+            _prefeeder_refresh_cache()
+    st = _PF_CACHED_STATUS
+    _pf_last_fault_sig = _prefeeder_fault_sig(st) if st else ()
+    _PF_ERROR_LATCH = False
     en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
     _set_machine_ui(
         ciclo_error="",
@@ -2783,7 +4281,7 @@ def _cycle_reset_error() -> tuple[bool, str]:
         if en_curso
         else "Sistema listo. Sin errores activos.",
     )
-    _push_event("Reset de error — listo para reanudar." if en_curso else "Reset de error.")
+    _push_event("Reset — PLC fallos borrados; listo para reanudar." if en_curso else "Reset — PLC fallos borrados.")
     return True, ""
 
 
@@ -3259,7 +4757,7 @@ def _purge_cut() -> bool:
     _set_routine_ui(mensaje="NO METAS LAS MANOS. Corte y pinzas en 0.")
     if not sent_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True})):
         return False
-    if not sent_ok(_cycle_plc_send({"op": "valve", "name": "holder_encoder", "on": False})):
+    if not sent_ok(_cycle_plc_send({"op": "valve", "name": "holder", "on": False})):
         return False
     if not sent_ok(_cycle_plc_send({"op": "valve", "name": "cutters", "on": True})):
         return False
@@ -3446,31 +4944,12 @@ def _alimentar_run(side: str) -> None:
     _set_routine_ui(rutina="", rutina_fase="", rutina_manos=False)
 
 
-def _alimentar_lado(side: str):
-    def run():
-        _alimentar_run(side)
-
-    if _MACHINE_STATE.get("rutina"):
-        return False, "Hay una rutina en curso."
-    if _MACHINE_STATE.get("estado") == "running":
-        return False, "Hay un ciclo en marcha."
-    if _target_length_mm() <= 0:
-        return False, "Selecciona un modelo con longitud."
-    ready, err = _require_links()
-    if not ready:
-        return False, err
-    ok, err = _start_routine(run)
-    if not ok:
-        return False, err
-    return True, f"Alimentando lado {_SIDE_NAME[side]}."
-
-
 def _alimentar_izquierda(data=None):
-    return _alimentar_lado("L")
+    return False, "Mantén pulsado Alimentar izquierda en el panel."
 
 
 def _alimentar_derecha(data=None):
-    return _alimentar_lado("R")
+    return False, "Mantén pulsado Alimentar derecha en el panel."
 
 
 def _feeder_init_now() -> tuple[bool, str]:
@@ -3494,29 +4973,31 @@ def _feeder_init_now() -> tuple[bool, str]:
 def _prealimentador_iniciar(_data=None) -> tuple[bool, str]:
     if _MACHINE_STATE.get("rutina"):
         return False, "Hay una rutina en curso."
-    busy = _motion_owner_busy()
-    if busy:
-        return False, busy
-    return _feeder_init_now()
-
-
-def _carga_material(_data=None) -> tuple[bool, str]:
-    if _MACHINE_STATE.get("rutina") == "purga":
-        return False, "No se puede cargar material con una purga en curso."
-    busy = _motion_owner_busy()
-    if busy:
-        return False, busy
-    turning_on = not bool(_MACHINE_STATE.get("carga_material"))
+    if not _prefeeder_required():
+        return True, "PreAlimentador sin COM (omite estabilización)."
+    ok, msg = _prefeeder_stabilize_and_lock()
+    _prefeeder_refresh_cache()
+    if not ok:
+        st = _PF_CACHED_STATUS
+        sig = _prefeeder_fault_sig(st) if st else ()
+        if sig:
+            _prefeeder_raise_fault(sig)
+        else:
+            _enter_machine_error("E099", msg, en_curso=False)
+        return False, msg
+    global _pf_last_fault_sig, _PF_ERROR_LATCH
+    _pf_last_fault_sig = ()
+    _PF_ERROR_LATCH = False
     with _STATE_LOCK:
-        _MACHINE_STATE["carga_material"] = turning_on
-    if turning_on and _MACHINE_STATE.get("ciclo_en_curso"):
-        _rearm_piece("Carga de material. El ciclo queda en pausa y la pieza vuelve al paso 1.")
-    elif turning_on:
-        _set_machine_ui(mensaje="Carga de material activa. Iniciar y Reanudar quedan bloqueados.")
-    else:
-        _set_machine_ui(mensaje="Carga de material apagada.")
-    _push_event("Carga de material activa." if turning_on else "Carga de material apagada.")
-    return True, "Carga de material activa." if turning_on else "Carga de material apagada."
+        if _MACHINE_STATE.get("estado") == "error" and not _MACHINE_STATE.get("ciclo_en_curso"):
+            _set_machine_ui(
+                estado="idle",
+                estado_label="En espera",
+                ciclo_error="",
+                mensaje="PreAlimentador estabilizado y bloqueado.",
+            )
+    _push_event("PreAlimentador estabilizado y bloqueado.")
+    return True, "PreAlimentador estabilizado y bloqueado."
 
 
 def _omitir_holgura(side: str, data) -> tuple[bool, str]:
@@ -3528,6 +5009,8 @@ def _omitir_holgura(side: str, data) -> tuple[bool, str]:
         nxt = not bool(_MACHINE_STATE.get(key))
         _MACHINE_STATE[key] = nxt
     nombre = _SIDE_NAME[side]
+    if _prefeeder_required():
+        _prefeeder_set_omit(side, nxt)
     if nxt:
         _push_event(f"Holgura {nombre} omitida. Empleado {empleado}.")
         return True, f"Holgura {nombre} omitida."
@@ -3693,6 +5176,12 @@ def _checklist_preparar(_data=None) -> tuple[bool, str]:
     ok, err = _feeder_init_now()
     if not ok:
         return False, err
+    if _prefeeder_required():
+        ok_pf, err_pf = _prealimentador_iniciar()
+        if not ok_pf:
+            return False, err_pf
+        _checklist_update(alimentador_ok=True)
+        return True, "Motion y PreAlimentador listos."
     _checklist_update(alimentador_ok=True)
     return True, err
 
@@ -3811,10 +5300,7 @@ _ROUTINE_ACTIONS = {
     "purga_continuar": _purga_continuar_action,
     "purga_terminar": _purga_terminar_action,
     "posicion_inicial": _posicion_inicial,
-    "carga_material": _carga_material,
     "iniciar": _prealimentador_iniciar,
-    "alimentar_izquierda": _alimentar_izquierda,
-    "alimentar_derecha": _alimentar_derecha,
     "omitir_holgura_izquierda": _omitir_holgura_izquierda,
     "omitir_holgura_derecha": _omitir_holgura_derecha,
     "checklist_empezar": _checklist_empezar,
@@ -3859,6 +5345,7 @@ def set_modelo():
         _MACHINE_STATE["longitud_modelo_mm"] = None
         _MOTION_DATA["modelo_id"] = ""
         _MOTION_DATA["target_length_mm"] = None
+        _save_hmi_cycle_extras()
         return jsonify({"ok": True, "state": _public_machine_state(), "motion_data": dict(_MOTION_DATA)})
 
     entry = _find_modelo(modelo_id)
@@ -3869,6 +5356,7 @@ def set_modelo():
     _MACHINE_STATE["longitud_modelo_mm"] = entry.get("longitud_mm")
     _MOTION_DATA["modelo_id"] = entry["modelo"]
     _MOTION_DATA["target_length_mm"] = entry.get("longitud_mm")
+    _save_hmi_cycle_extras()
     return jsonify({"ok": True, "state": _public_machine_state(), "motion_data": dict(_MOTION_DATA)})
 
 
@@ -3881,6 +5369,7 @@ def set_compensacion():
         return jsonify({"ok": False, "error": "Compensación inválida"}), 400
     _MACHINE_STATE["compensacion_medicion_mm"] = mm
     _MOTION_DATA["measure_comp_mm"] = mm
+    _mirror_comp_to_cycle_json(mm)
     flat = _motion_data_flat(_MOTION_DATA)
     sent = _send_motion_serial([_compact(flat)])
     return jsonify(
@@ -3906,11 +5395,13 @@ def set_cantidad():
     if _LOT["active"] or _LOT["tray_wait"]:
         return jsonify({"ok": False, "error": "No se cambia la cantidad con un lote en curso."}), 400
     _MACHINE_STATE["cantidad"] = n
+    _save_hmi_cycle_extras()
     return jsonify({"ok": True, "state": _public_machine_state()})
 
 
 @app.route("/api/state", methods=["GET"])
 def get_state():
+    _prefeeder_maybe_refresh_ui()
     return jsonify({"ok": True, **_public_machine_state()})
 
 
@@ -3929,6 +5420,7 @@ def api_errors():
 def cycle_config():
     if request.method == "GET":
         params = _load_cycle_params()
+        params["cut_offset_mm"] = _measure_comp_mm()
         return jsonify(
             {
                 "ok": True,
@@ -3947,8 +5439,15 @@ def cycle_config():
         if key in patch and patch[key] is not None:
             params[key] = patch[key]
     params["feed_sides"] = _feed_sides_of(params)
+    if "cut_offset_mm" in patch:
+        try:
+            comp = float(patch["cut_offset_mm"])
+        except (TypeError, ValueError):
+            comp = 0.0
+        _MACHINE_STATE["compensacion_medicion_mm"] = comp
+        _MOTION_DATA["measure_comp_mm"] = comp
+        params["cut_offset_mm"] = comp
     for key in (
-        "cut_offset_mm",
         "deposit_stack_gap_mm",
         "deposit_max_travel_mm",
         "gripper_clearance_mm",
@@ -3957,6 +5456,13 @@ def cycle_config():
     ):
         params[key] = _num(params.get(key), _DEFAULT_CYCLE_PARAMS[key])
     params["deposit_batch_size"] = int(_num(params.get("deposit_batch_size"), 50))
+    _MOTION_DATA["tolerance_mm"] = _num(params.get("tolerance_mm"), 2.0)
+    params["cut_offset_mm"] = _measure_comp_mm()
+    try:
+        params["cantidad"] = max(1, int(_MACHINE_STATE.get("cantidad") or 1))
+    except (TypeError, ValueError):
+        params["cantidad"] = 1
+    params["numero_modelo"] = str(_MACHINE_STATE.get("numero_modelo") or "").strip()
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         CYCLE_PATH.write_text(
@@ -4163,9 +5669,11 @@ def motion_data():
             _MOTION_DATA[key] = patch[key]
     if "measure_comp_mm" in patch:
         try:
-            _MACHINE_STATE["compensacion_medicion_mm"] = float(patch["measure_comp_mm"])
+            comp = float(patch["measure_comp_mm"])
         except (TypeError, ValueError):
-            _MACHINE_STATE["compensacion_medicion_mm"] = 0.0
+            comp = 0.0
+        _MACHINE_STATE["compensacion_medicion_mm"] = comp
+        _mirror_comp_to_cycle_json(comp)
     flat = _motion_data_flat(_MOTION_DATA)
     return jsonify({"ok": True, "data": dict(_MOTION_DATA), "esp32_line": flat})
 
@@ -4218,6 +5726,137 @@ def plc_cmd():
     )
 
 
+@app.route("/api/prefeeder/tune", methods=["GET", "POST"])
+def prefeeder_tune():
+    try:
+        tune = _load_prefeeder_tune()
+    except (OSError, json.JSONDecodeError):
+        return jsonify({"ok": False, "error": "No se pudo leer PreFeeder.json"}), 500
+
+    if request.method == "GET":
+        # Leer actuales del maestro (NVS). PreFeeder.json solo es espejo local.
+        st = None
+        if _serial_port("prefeeder"):
+            st = _prefeeder_status_get() or _PF_CACHED_STATUS
+            if st:
+                _prefeeder_reconcile_pushed_from_status(st)
+        changed = False
+        for side in ("L", "R"):
+            live = _prefeeder_cfg_from_status_side(st, side)
+            if live is not None:
+                if _prefeeder_cfg_signature(tune[side]) != _prefeeder_cfg_signature(live):
+                    changed = True
+                tune[side] = live
+        if changed:
+            try:
+                _save_prefeeder_tune(tune)
+            except OSError:
+                pass
+        return jsonify({"ok": True, "tune": tune, "live": bool(st)})
+
+    data = request.get_json(silent=True) or {}
+    patch = data.get("tune") or data
+    if not isinstance(patch, dict):
+        return jsonify({"ok": False, "error": "JSON inválido"}), 400
+    merged = dict(tune)
+    for side in ("L", "R"):
+        if isinstance(patch.get(side), dict):
+            merged[side] = {**(tune.get(side) or {}), **patch[side]}
+    next_tune = _canonical_prefeeder_tune(merged)
+
+    # Guardar = escribir al maestro. El JSON local solo espeja lo confirmado.
+    push = {"L": False, "R": False}
+    applied: dict[str, bool | None] = {"L": None, "R": None}
+    if not _serial_port("prefeeder"):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Sin COM del maestro; no se pueden guardar parámetros en el ESP32.",
+                "tune": next_tune,
+                "pushed": push,
+                "applied": applied,
+            }
+        ), 400
+
+    if _PF_CACHED_STATUS:
+        _prefeeder_reconcile_pushed_from_status(_PF_CACHED_STATUS)
+    for side in ("L", "R"):
+        if not isinstance(patch.get(side), dict):
+            continue
+        ok, _changed = _prefeeder_set_config_side(side, next_tune[side])
+        push[side] = ok
+    st = _prefeeder_refresh_cache()
+    for side in ("L", "R"):
+        live = _prefeeder_cfg_from_status_side(st, side)
+        if isinstance(patch.get(side), dict):
+            if live is None:
+                applied[side] = False
+            else:
+                applied[side] = (
+                    _prefeeder_cfg_signature(live)
+                    == _prefeeder_cfg_signature(next_tune[side])
+                )
+        if live is not None:
+            next_tune[side] = live
+    # Espejo local = lo que quedó en el maestro.
+    try:
+        _save_prefeeder_tune(next_tune)
+    except OSError:
+        return jsonify({"ok": False, "error": "No se pudo guardar PreFeeder.json"}), 500
+    return jsonify(
+        {"ok": True, "tune": next_tune, "pushed": push, "applied": applied}
+    )
+
+
+@app.route("/api/prefeeder/status", methods=["GET"])
+def prefeeder_status():
+    global _PF_CACHED_STATUS
+    port_ok = bool(_serial_port("prefeeder"))
+    force = request.args.get("force") == "1"
+    status = None
+    if port_ok and (force or _prefeeder_comm_active()):
+        status = _prefeeder_refresh_cache()
+        _prefeeder_watch_once()
+    elif _PF_CACHED_STATUS:
+        status = _PF_CACHED_STATUS
+    return jsonify(
+        {
+            "ok": True,
+            "sent": bool(port_ok and status is not None),
+            "status": status,
+            "active_errors": _prefeeder_active_errors(status),
+        }
+    )
+
+
+@app.route("/api/prefeeder/cmd", methods=["POST"])
+def prefeeder_cmd():
+    body = request.get_json(silent=True) or {}
+    op = str(body.get("op") or "").strip()
+    if op == "set_force_feed":
+        side = str(body.get("side") or "").upper()
+        on = bool(body.get("on"))
+        if side not in ("L", "R"):
+            return jsonify({"ok": False, "error": "Lado no reconocido."}), 400
+        if not _prefeeder_required():
+            return jsonify({"ok": False, "error": "Sin COM del PreAlimentador."}), 400
+        ok = _prefeeder_set_force(side, on)
+        if ok:
+            with _PF_MANUAL_HOLD_LOCK:
+                _PF_MANUAL_HOLD[side] = on
+                other = "R" if side == "L" else "L"
+                any_hold = _PF_MANUAL_HOLD["L"] or _PF_MANUAL_HOLD["R"]
+            if not on and not any_hold:
+                with _STATE_LOCK:
+                    in_cycle = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+                    running = _MACHINE_STATE.get("estado") == "running"
+                    rutina = bool(_MACHINE_STATE.get("rutina"))
+                if not in_cycle and not running and not rutina:
+                    _prefeeder_set_feed_lock(True)
+        return jsonify({"ok": ok, "op": op, "side": side, "on": on})
+    return jsonify({"ok": False, "error": "Orden no reconocida."}), 400
+
+
 @app.route("/api/serial", methods=["GET", "POST"])
 def serial_ports():
     """Puertos COM elegidos en la pantalla."""
@@ -4232,6 +5871,7 @@ def serial_ports():
                 "motion": _serial_port("motion"),
                 "plc": _serial_port("plc"),
                 "andon": _serial_port("andon"),
+                "prefeeder": _serial_port("prefeeder"),
                 "andon_disabled": ad,
                 "andon_skipped": _andon_skipped_effective(),
                 "andon_none_value": _ANDON_NONE_TOKEN,
@@ -4243,8 +5883,10 @@ def serial_ports():
     motion_raw = str(body.get("motion") or "").strip()
     plc_raw = str(body.get("plc") or "").strip()
     andon_raw = str(body.get("andon") or "").strip()
+    prefeeder_raw = str(body.get("prefeeder") or "").strip()
     motion = _match_listed_port(motion_raw, listed)
     plc = _match_listed_port(plc_raw, listed)
+    prefeeder = _match_listed_port(prefeeder_raw, listed)
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (POST: token __none__ y andon_disable_ui) ---
     andon_disable_ui = andon_raw == _ANDON_NONE_TOKEN
     if andon_disable_ui:
@@ -4257,16 +5899,20 @@ def serial_ports():
         return jsonify({"ok": False, "error": "El puerto del PLC no está conectado."}), 400
     if andon_raw and not andon_disable_ui and not andon:
         return jsonify({"ok": False, "error": "El puerto del Andon no está conectado."}), 400
-    chosen = [port for port in (motion, plc, andon) if port]
+    if prefeeder_raw and not prefeeder:
+        return jsonify({"ok": False, "error": "El puerto del PreAlimentador no está conectado."}), 400
+    chosen = [port for port in (motion, plc, andon, prefeeder) if port]
     if len(chosen) != len({port.upper() for port in chosen}):
         return jsonify({"ok": False, "error": "Cada módulo tiene que usar un COM distinto."}), 400
 
     with _serial_cfg_lock:
         checklist_bypass = bool(_serial_cfg.get("checklist_bypass"))
     try:
-        _save_serial_cfg(motion, plc, andon, andon_disable_ui, checklist_bypass)
+        _save_serial_cfg(motion, plc, andon, andon_disable_ui, checklist_bypass, prefeeder)
     except OSError:
         return jsonify({"ok": False, "error": "No se pudo guardar el puerto."}), 500
+    if prefeeder:
+        _prefeeder_adopt_live_config()
 
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (respuesta POST: campos extras) ---
     return jsonify(
@@ -4275,6 +5921,7 @@ def serial_ports():
             "motion": motion,
             "plc": plc,
             "andon": andon,
+            "prefeeder": prefeeder,
             "andon_disabled": andon_disable_ui,
             "andon_skipped": _andon_skipped_effective(),
             "andon_none_value": _ANDON_NONE_TOKEN,
@@ -4291,9 +5938,10 @@ def checklist_bypass_setting():
             motion = str(_serial_cfg.get("motion") or "")
             plc = str(_serial_cfg.get("plc") or "")
             andon = str(_serial_cfg.get("andon") or "")
+            prefeeder = str(_serial_cfg.get("prefeeder") or "")
             andon_disabled = bool(_serial_cfg.get("andon_disabled"))
         try:
-            _save_serial_cfg(motion, plc, andon, andon_disabled, enabled)
+            _save_serial_cfg(motion, plc, andon, andon_disabled, enabled, prefeeder)
         except OSError:
             return jsonify({"ok": False, "error": "No se pudo guardar la configuración."}), 500
         _push_event("Bypass de checklist activo." if enabled else "Checklist obligatorio.")
@@ -4305,7 +5953,7 @@ def serial_module_test():
     """Comprueba que el COM elegido responde y es el MCU pedido. Andon incluido."""
     body = request.get_json(silent=True) or {}
     which = str(body.get("module") or "").strip().lower()
-    if which not in ("motion", "plc", "andon"):
+    if which not in ("motion", "plc", "andon", "prefeeder"):
         return jsonify({"ok": False, "error": "Módulo no reconocido."}), 400
     # --- ANDON_SKIP_OPCIONAL — TODO_BORRAR (early return si Andon omitido) ---
     if which == "andon" and _andon_skipped_effective():
@@ -4342,7 +5990,17 @@ def _action_rejected(err: str):
     """El rechazo queda en el letrero. El panel de eventos puede estar cerrado."""
     if err:
         _push_event(err, "error")
-        _set_machine_ui(mensaje=err)
+        head = (err.split(maxsplit=1)[0] if err else "") or ""
+        if len(head) >= 4 and head[0] == "E" and head[1:].isdigit():
+            code = head
+            _set_machine_ui(
+                estado="error",
+                estado_label="Error",
+                mensaje=err,
+                ciclo_error=code,
+            )
+        else:
+            _set_machine_ui(mensaje=err)
     return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
 
 
@@ -4365,6 +6023,16 @@ def action():
             if not ok:
                 return _action_rejected(err)
             message = "Lote iniciado."
+        elif action_name == "step_start":
+            ok, err = _cycle_step_start()
+            if not ok:
+                return _action_rejected(err)
+            message = err or "Prueba paso a paso iniciada."
+        elif action_name == "step_next":
+            ok, err = _cycle_step_next()
+            if not ok:
+                return _action_rejected(err)
+            message = err or "Siguiente paso."
         elif action_name == "pause":
             _cycle_pause()
             message = "Pausa solicitada."
@@ -4380,7 +6048,7 @@ def action():
             ok, err = _cycle_reset_error()
             if not ok:
                 return _action_rejected(err)
-            message = "Reset de error."
+            message = "Reset."
         else:
             message = f"Acción proceso: {action_name}"
     else:
@@ -4397,10 +6065,19 @@ def action():
     )
 
 
+_hydrate_hmi_from_cycle()
+
+threading.Thread(target=_prefeeder_watch_loop, daemon=True, name="prefeeder_watch").start()
+threading.Thread(target=_prefeeder_boot_lock, daemon=True, name="prefeeder_boot").start()
+
 if __name__ == "__main__":
     # Sin una línea por cada GET de sondeo del HMI (~400–800 ms).
+    # use_reloader=False: el reloader mata el hilo del ciclo a mitad de un
+    # lmguide_move / feed_stage y al reiniciar deja la HMI en «En espera»
+    # sin código de error (estado en RAM se pierde).
     app.run(
         debug=True,
+        use_reloader=False,
         host="0.0.0.0",
         port=5000,
         request_handler=_QuietRequestHandler,

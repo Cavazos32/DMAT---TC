@@ -13,7 +13,7 @@ CATALOG: dict[str, tuple[str, str]] = {
     "E000": ("Sistema", "Error desconocido."),
     "E001": ("Orquestador", "No se puede alimentar: holder y encoder deben estar activos (paso 2)."),
     "E002": ("Orquestador", "No se pueden accionar pinzas: falta alimentación L/R validada (paso 3)."),
-    "E003": ("Orquestador", "No se puede ir a corte: pinzas activas y holder/encoder liberados (paso 4)."),
+    "E003": ("Orquestador", "No se puede ir a corte: pinzas activas, holder liberado y encoder cerrado (paso 4)."),
     "E004": ("Orquestador", "No se puede cortar: LM Guide debe estar en posición de corte (paso 5)."),
     "E005": ("Orquestador", "No se puede descargar: el corte debe haberse completado (paso 6)."),
     "E006": ("Orquestador", "No se puede ir a home/blower: falta descarga de pieza (paso 7)."),
@@ -48,10 +48,23 @@ CATALOG: dict[str, tuple[str, str]] = {
     "E043": ("Motion", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
     "E044": ("Motion", "LM Guide: el movimiento no se validó en destino (revisar drive o bus)."),
     "E045": ("Motion", "Alimentación interrumpida (Stop u orden feeder_stop)."),
-    "E046": ("Orquestador", "No se puede limpiar el error: falla del PLC o seguridad en Motion siguen activas."),
+    "E046": (
+        "Orquestador",
+        "No se puede limpiar el error: falla del PLC, seguridad en Motion, falla de campo del PreAlimentador o enlace sin respuesta estable.",
+    ),
     "E070": ("Andon", "No hay puerto COM seleccionado. Elígelo en Parámetros, pestaña Conexión."),
     "E071": ("Andon", "El COM seleccionado no es el MCU Andon."),
     "E072": ("Andon", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
+    "E090": ("PreAlimentador", "No hay puerto COM seleccionado. Elígelo en Parámetros, pestaña Conexión."),
+    "E091": ("PreAlimentador", "El COM seleccionado no es el maestro PreAlimentador."),
+    "E092": ("PreAlimentador", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
+    "E093": ("PreAlimentador", "Falla de cilindro en el lado L."),
+    "E094": ("PreAlimentador", "Falla de manguera en el lado L."),
+    "E095": ("PreAlimentador", "Falla de holgura en el lado L."),
+    "E096": ("PreAlimentador", "Falla de cilindro en el lado R."),
+    "E097": ("PreAlimentador", "Falla de manguera en el lado R."),
+    "E098": ("PreAlimentador", "Falla de holgura en el lado R."),
+    "E099": ("PreAlimentador", "No está listo ni estabilizado (usa Iniciar o revisa fallas)."),
 }
 
 FEED_STAGE_TO_CODE: dict[str, str] = {
@@ -66,6 +79,8 @@ FEED_STAGE_TO_CODE: dict[str, str] = {
     "comp_move": "E037",
     "safety": "E039",
     "stopped": "E045",
+    "feed_no_reply": "E038",
+    "feed_overlap_timeout": "E038",
     "unknown": "E038",
 }
 
@@ -75,6 +90,16 @@ PLC_FAULT_FIELDS: tuple[tuple[str, str], ...] = (
     ("fault_cutter", "E022"),
     ("fault_gripper", "E023"),
 )
+
+# fault numérico del firmware PreFeeder (ErrorCode.h) por lado
+PFEEDER_FAULT_MAP: dict[tuple[str, int], str] = {
+    ("L", 3): "E093",
+    ("L", 4): "E094",
+    ("L", 6): "E095",
+    ("R", 3): "E096",
+    ("R", 4): "E097",
+    ("R", 6): "E098",
+}
 
 
 def format_message(code: str, **kwargs: Any) -> str:
@@ -116,6 +141,30 @@ def plc_fault_codes(status: dict | None) -> list[str]:
 
 def plc_fault_messages(status: dict | None) -> list[str]:
     return [format_message(c) for c in plc_fault_codes(status)]
+
+
+def prefeeder_fault_codes(status: dict | None) -> list[str]:
+    if not status:
+        return []
+    out: list[str] = []
+    for side in ("L", "R"):
+        block = status.get(side)
+        if not isinstance(block, dict):
+            continue
+        try:
+            fault = int(block.get("fault") or 0)
+        except (TypeError, ValueError):
+            fault = 0
+        if not fault:
+            continue
+        code = PFEEDER_FAULT_MAP.get((side, fault))
+        if code:
+            out.append(code)
+    return out
+
+
+def prefeeder_fault_messages(status: dict | None) -> list[str]:
+    return [format_message(c) for c in prefeeder_fault_codes(status)]
 
 
 def catalog_for_api() -> dict[str, dict[str, str]]:

@@ -119,7 +119,8 @@ static const float    PARAM_LM_MOVE_TOLERANCE_MM  = 0.5f;
 static const float    PARAM_LM_HOME_TOLERANCE_MM  = 1.0f;
 static const float    PARAM_LM_HOME_MAX_TRAVEL_MM = 120.0f;
 static const uint32_t PARAM_LM_MOVE_DONE_TIMEOUT_MS = 45000;
-static const uint8_t  PARAM_LM_MOVE_MAX_ATTEMPTS  = 3;
+// Un solo intento: si Modbus/destino fallan, el error debe salir sin esperar 3×45 s.
+static const uint8_t  PARAM_LM_MOVE_MAX_ATTEMPTS  = 1;
 
 static const uint16_t PARAM_LM_HOME_TORQUE_PCT    = 10;
 static const uint16_t PARAM_LM_HOME_TIME_MS       = 150;

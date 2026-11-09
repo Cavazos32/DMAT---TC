@@ -163,8 +163,10 @@ static const uint16_t ASDA_DO_BIT_HOME = 0x0100;  // bit 8 — homing completado
 //   0      → Servo OFF
 //   0xFFFF → paso intermedio antes de OFF (secuencia firmware)
 
-// Valores típicos P6.002 (FC 0x10, 32 bit):
-//   0x00000002 → PR1 absoluto
+// Valores típicos P6.002 (FC 0x10, 32 bit) — PATH#1 definition (ASDA-B3):
+//   nibble X (bits 0..3) = TYPE: 2 = SINGLE (posición, para al terminar)
+//   nibble Y (bits 4..7) = OPT:  0 = ABS (absoluto), 1 = REL, 3 = INC
+//   0x00000002 → PR1 posición absoluta (TYPE=2, OPT=ABS)
 
 // P5.004 homing (16): 0x0029 forward / 0x002A reverse (según sentido máquina)
 

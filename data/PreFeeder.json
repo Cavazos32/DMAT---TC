@@ -1,0 +1,18 @@
+{
+  "L": {
+    "rpm": 60.0,
+    "settle_ms": 150,
+    "on_s": 2.0,
+    "off_fault_s": 5.0,
+    "stall_fault_s": 2.0,
+    "servo_us": 500
+  },
+  "R": {
+    "rpm": 90.0,
+    "settle_ms": 150,
+    "on_s": 2.0,
+    "off_fault_s": 5.0,
+    "stall_fault_s": 2.0,
+    "servo_us": 2500
+  }
+}

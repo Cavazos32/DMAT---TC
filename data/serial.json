@@ -2,6 +2,7 @@
   "motion": "COM8",
   "plc": "COM16",
   "andon": "",
+  "prefeeder": "COM18",
   "andon_disabled": true,
   "checklist_bypass": true
 }

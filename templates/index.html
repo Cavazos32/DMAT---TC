@@ -58,7 +58,7 @@
             <button type="button" class="btn btn-stop" data-action="stop">Stop</button>
           </div>
           <div class="btn-grid btn-grid--process-reset">
-            <button type="button" class="btn btn-reset" data-action="reset">Borrar error</button>
+            <button type="button" class="btn btn-reset" data-action="reset">Reset</button>
           </div>
         </section>
 
@@ -123,10 +123,9 @@
         <section class="panel panel--prefeeder" data-block="prealimentador">
           <h2 class="panel-title">PreAlimentador</h2>
           <div class="btn-grid">
-            <button type="button" class="btn btn-feeder" data-action="carga_material">Carga de material</button>
             <button type="button" class="btn btn-feeder" data-action="iniciar">Iniciar</button>
-            <button type="button" class="btn btn-feeder" data-action="alimentar_izquierda">Alimentar izquierda</button>
-            <button type="button" class="btn btn-feeder" data-action="alimentar_derecha">Alimentar derecha</button>
+            <button type="button" class="btn btn-feeder" data-pf-hold="L" data-action="alimentar_izquierda">Alimentar izquierda</button>
+            <button type="button" class="btn btn-feeder" data-pf-hold="R" data-action="alimentar_derecha">Alimentar derecha</button>
             <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_izquierda">Omitir holgura izquierda</button>
             <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_derecha">Omitir holgura derecha</button>
           </div>
@@ -192,11 +191,21 @@
         <button type="button" class="modal-tab is-active" role="tab" id="tabBtnCycle" aria-selected="true" aria-controls="tabPanelCycle" data-tab="cycle">Ciclo</button>
         <button type="button" class="modal-tab" role="tab" id="tabBtnMotion" aria-selected="false" aria-controls="tabPanelMotion" data-tab="motion">Motion</button>
         <button type="button" class="modal-tab" role="tab" id="tabBtnPlc" aria-selected="false" aria-controls="tabPanelPlc" data-tab="plc">PLC</button>
+        <button type="button" class="modal-tab" role="tab" id="tabBtnPrefeeder" aria-selected="false" aria-controls="tabPanelPrefeeder" data-tab="prefeeder">PreAlimentador</button>
         <button type="button" class="modal-tab" role="tab" id="tabBtnConexion" aria-selected="false" aria-controls="tabPanelConexion" data-tab="conexion">Conexión</button>
       </div>
       <div class="parametros-shell__body">
         <section class="tab-panel is-active" role="tabpanel" id="tabPanelCycle" aria-labelledby="tabBtnCycle" data-tab-panel="cycle">
           <ol class="cycle-steps" id="cycleStepsList" aria-label="Pasos del ciclo 1 a 8"></ol>
+          <div class="cycle-step-test" id="cycleStepTest">
+            <h3 class="cycle-params__title">Prueba paso a paso</h3>
+            <p class="modal__hint" id="cycleStepTestHint">Ejecuta una pieza y se detiene al completar cada paso. Usa «Siguiente paso» para continuar.</p>
+            <div class="motion-params__actions">
+              <button type="button" class="btn btn-config" id="cycleStepStart">Iniciar</button>
+              <button type="button" class="btn btn-config" id="cycleStepNext" disabled>Siguiente paso</button>
+              <button type="button" class="btn btn-config" id="cycleStepStop" disabled>Detener</button>
+            </div>
+          </div>
           <form class="cycle-params" id="cycleParamsForm" autocomplete="off">
             <h3 class="cycle-params__title">Tiempos fijos (ms)</h3>
             <div class="cycle-params__grid">
@@ -235,10 +244,7 @@
                 </select>
               </label>
               <label class="motion-field">Corte (mm)
-                <input type="text" id="cycleCutMm" readonly placeholder="largo − 55 + offset">
-              </label>
-              <label class="motion-field">Offset de corte (mm)
-                <input type="number" step="0.01" data-cycle-param="cut_offset_mm" placeholder="0">
+                <input type="text" id="cycleCutMm" readonly placeholder="largo − 55 + compensación">
               </label>
               <label class="motion-field">Cortes por montón
                 <input type="number" min="1" step="1" data-cycle-param="deposit_batch_size">
@@ -449,6 +455,105 @@
             </div>
           </form>
         </section>
+        <section class="tab-panel" role="tabpanel" id="tabPanelPrefeeder" aria-labelledby="tabBtnPrefeeder" data-tab-panel="prefeeder" hidden>
+          <form class="motion-params" id="prefeederTuneForm" autocomplete="off">
+            <div class="motion-params__actions">
+              <button type="button" class="btn btn-config" id="prefeederTuneReload">Recargar</button>
+              <button type="button" class="btn btn-config" id="prefeederStatusRefresh">Actualizar estado</button>
+            </div>
+            <p class="motion-params__serial-hint" id="prefeederEsp32Hint" hidden></p>
+            <div class="motion-params__grid">
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>LADO L</legend>
+                <p class="motion-params__note" id="pfBanL" role="status">—</p>
+                <div class="motion-validate">
+                  <div class="motion-validate__row">
+                    <p class="motion-laser" id="pfCylL" role="status" aria-label="Cilindro L">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Cilindro</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfHoseL" role="status" aria-label="Manguera L">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Manguera</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfHolgL" role="status" aria-label="Holgura L">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Holgura</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                  </div>
+                </div>
+                <div class="motion-fieldset__row">
+                  <label class="motion-field">RPM
+                    <input type="number" min="1" max="600" step="1" data-pf-side="L" data-pf-key="rpm">
+                  </label>
+                  <label class="motion-field">Servo (µs)
+                    <input type="number" min="500" max="2500" step="10" data-pf-side="L" data-pf-key="servo_us">
+                  </label>
+                  <label class="motion-field">Asentamiento (ms)
+                    <input type="number" min="10" max="500" step="10" data-pf-side="L" data-pf-key="settle_ms">
+                  </label>
+                  <label class="motion-field">Tras flanco ON (s)
+                    <input type="number" min="0.1" max="120" step="0.1" data-pf-side="L" data-pf-key="on_s">
+                  </label>
+                  <label class="motion-field">Fallo OFF (s)
+                    <input type="number" min="0.5" max="300" step="0.5" data-pf-side="L" data-pf-key="off_fault_s">
+                  </label>
+                  <label class="motion-field">Fallo quieto (s)
+                    <input type="number" min="0.5" max="60" step="0.5" data-pf-side="L" data-pf-key="stall_fault_s">
+                  </label>
+                </div>
+                <button type="button" class="btn btn-config" data-pf-save="L">Guardar L</button>
+              </fieldset>
+              <fieldset class="motion-fieldset motion-fieldset--wide">
+                <legend>LADO R</legend>
+                <p class="motion-params__note" id="pfBanR" role="status">—</p>
+                <div class="motion-validate">
+                  <div class="motion-validate__row">
+                    <p class="motion-laser" id="pfCylR" role="status" aria-label="Cilindro R">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Cilindro</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfHoseR" role="status" aria-label="Manguera R">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Manguera</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfHolgR" role="status" aria-label="Holgura R">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Holgura</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                  </div>
+                </div>
+                <div class="motion-fieldset__row">
+                  <label class="motion-field">RPM
+                    <input type="number" min="1" max="600" step="1" data-pf-side="R" data-pf-key="rpm">
+                  </label>
+                  <label class="motion-field">Servo (µs)
+                    <input type="number" min="500" max="2500" step="10" data-pf-side="R" data-pf-key="servo_us">
+                  </label>
+                  <label class="motion-field">Asentamiento (ms)
+                    <input type="number" min="10" max="500" step="10" data-pf-side="R" data-pf-key="settle_ms">
+                  </label>
+                  <label class="motion-field">Tras flanco ON (s)
+                    <input type="number" min="0.1" max="120" step="0.1" data-pf-side="R" data-pf-key="on_s">
+                  </label>
+                  <label class="motion-field">Fallo OFF (s)
+                    <input type="number" min="0.5" max="300" step="0.5" data-pf-side="R" data-pf-key="off_fault_s">
+                  </label>
+                  <label class="motion-field">Fallo quieto (s)
+                    <input type="number" min="0.5" max="60" step="0.5" data-pf-side="R" data-pf-key="stall_fault_s">
+                  </label>
+                </div>
+                <button type="button" class="btn btn-config" data-pf-save="R">Guardar R</button>
+              </fieldset>
+            </div>
+          </form>
+        </section>
         <section class="tab-panel" role="tabpanel" id="tabPanelConexion" aria-labelledby="tabBtnConexion" data-tab-panel="conexion" hidden>
           <p class="modal__hint">Elige el puerto USB de cada módulo. Sin conexión, la máquina no arranca el ciclo.</p>
           <div class="conexion-grid">
@@ -475,6 +580,14 @@
               </label>
               <p class="conexion-module__status" id="serialAndonStatus" role="status"></p>
               <button type="button" class="btn btn-config" id="btnAndonTest">Probar COM</button>
+            </article>
+            <article class="conexion-module">
+              <h3 class="conexion-module__title">PreAlimentador (maestro)</h3>
+              <label class="motion-field" for="selectPrefeederPort">Puerto
+                <select id="selectPrefeederPort"></select>
+              </label>
+              <p class="conexion-module__status" id="serialPrefeederStatus" role="status"></p>
+              <button type="button" class="btn btn-config" id="btnPrefeederTest">Probar COM</button>
             </article>
           </div>
           <button type="button" class="btn btn-config conexion-refresh" id="btnRefreshPorts">Actualizar puertos</button>

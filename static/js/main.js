@@ -24,13 +24,22 @@
     selectMotionPort: document.getElementById("selectMotionPort"),
     selectPlcPort: document.getElementById("selectPlcPort"),
     selectAndonPort: document.getElementById("selectAndonPort"),
+    selectPrefeederPort: document.getElementById("selectPrefeederPort"),
     btnRefreshPorts: document.getElementById("btnRefreshPorts"),
     btnMotionTest: document.getElementById("btnMotionTest"),
     btnPlcTest: document.getElementById("btnPlcTest"),
     btnAndonTest: document.getElementById("btnAndonTest"),
+    btnPrefeederTest: document.getElementById("btnPrefeederTest"),
     serialMotionStatus: document.getElementById("serialMotionStatus"),
     serialPlcStatus: document.getElementById("serialPlcStatus"),
     serialAndonStatus: document.getElementById("serialAndonStatus"),
+    serialPrefeederStatus: document.getElementById("serialPrefeederStatus"),
+    prefeederTuneForm: document.getElementById("prefeederTuneForm"),
+    prefeederTuneReload: document.getElementById("prefeederTuneReload"),
+    prefeederStatusRefresh: document.getElementById("prefeederStatusRefresh"),
+    prefeederEsp32Hint: document.getElementById("prefeederEsp32Hint"),
+    pfBanL: document.getElementById("pfBanL"),
+    pfBanR: document.getElementById("pfBanR"),
     toggleEventsPanel: document.getElementById("toggleEventsPanel"),
     toggleChecklistBypass: document.getElementById("toggleChecklistBypass"),
     settingsModal: document.getElementById("settingsModal"),
@@ -56,6 +65,10 @@
     cycleStepsList: document.getElementById("cycleStepsList"),
     cycleParamsForm: document.getElementById("cycleParamsForm"),
     cycleCutMm: document.getElementById("cycleCutMm"),
+    cycleStepStart: document.getElementById("cycleStepStart"),
+    cycleStepNext: document.getElementById("cycleStepNext"),
+    cycleStepStop: document.getElementById("cycleStepStop"),
+    cycleStepTestHint: document.getElementById("cycleStepTestHint"),
     statusBannerActions: document.getElementById("statusBannerActions"),
     checklistModal: document.getElementById("checklistModal"),
     checklistModalClose: document.getElementById("checklistModalClose"),
@@ -87,6 +100,7 @@
   let statePollTimer = null;
   let cycleStepsCatalog = [];
   let plcPollTimer = null;
+  let pfPollTimer = null;
   let checklistViewKey = "";
   let empleadoWait = null;
 
@@ -105,7 +119,15 @@
     ["plcFaultGripper", "fault_gripper"],
   ];
 
-  const PROCESS_ACTIONS = new Set(["start", "resume", "pause", "stop", "reset"]);
+  const PROCESS_ACTIONS = new Set([
+    "start",
+    "step_start",
+    "step_next",
+    "resume",
+    "pause",
+    "stop",
+    "reset",
+  ]);
 
   const bannerClassByEstado = {
     idle: "status-banner--idle",
@@ -186,27 +208,50 @@
         if (!quiet) pushLocalEvent(data.error || "No se guardó la compensación.", "error");
         return;
       }
-      try {
-        localStorage.setItem(STORAGE_COMP, String(mm));
-      } catch (e) {
-        /* ignore */
-      }
+      persistCompLocal(mm);
       if (data.state) applyState(data.state);
     } catch (err) {
       if (!quiet) pushLocalEvent("No se guardó la compensación.", "error");
     }
   }
 
-  async function restoreMeasureComp() {
-    let mm = 0;
+  function persistCompLocal(mm) {
     try {
-      const saved = localStorage.getItem(STORAGE_COMP);
-      if (saved != null && saved !== "" && Number.isFinite(Number(saved))) mm = Number(saved);
+      localStorage.setItem(STORAGE_COMP, String(mm));
     } catch (e) {
       /* ignore */
     }
-    setCompInput(mm);
-    await saveMeasureComp(mm, true);
+  }
+
+  function syncUiFromPersistedState(state) {
+    if (!state) return;
+    const comp = Number(state.compensacion_medicion_mm);
+    if (Number.isFinite(comp)) {
+      persistCompLocal(comp);
+      setCompInput(comp);
+    }
+    const modelo = state.numero_modelo || "";
+    if (modelo) {
+      try {
+        localStorage.setItem(STORAGE_MODEL, modelo);
+      } catch (e) {
+        /* ignore */
+      }
+      syncModelSelect(modelo);
+    }
+  }
+
+  async function maybeRestoreModelFromLocal() {
+    if (!els.selectModelo || els.selectModelo.value) return;
+    let saved = "";
+    try {
+      saved = localStorage.getItem(STORAGE_MODEL) || "";
+    } catch (e) {
+      /* ignore */
+    }
+    if (saved && modelosCatalog.some(function (m) { return m.modelo === saved; })) {
+      await selectModelo(saved, true);
+    }
   }
 
   function setEventsPanelVisible(visible) {
@@ -294,8 +339,7 @@
     els.metricLongitud.textContent = formatMm(state.longitud_modelo_mm);
     if (els.cycleCutMm) {
       const len = Number(state.longitud_modelo_mm);
-      const offEl = document.querySelector("[data-cycle-param='cut_offset_mm']");
-      const off = offEl ? Number(offEl.value) : 0;
+      const off = Number(state.compensacion_medicion_mm);
       const cut = len - LM_PIECE_OFFSET_MM + (Number.isFinite(off) ? off : 0);
       els.cycleCutMm.value = Number.isFinite(len) && len > 0 ? cut.toFixed(2) : "";
     }
@@ -308,17 +352,20 @@
     applyServerEvents(state, estado);
 
     syncProcessControls(state);
+    syncCycleStepTestControls(state);
     syncRoutine(state);
     renderCycleSteps(
       state.ciclo_paso_id || "",
       state.ciclo_paso_indice,
       state.ciclo_paralelo_id || ""
     );
+    const pfCom = !!(state.prefeeder && state.prefeeder.com);
     setStatePoll(
       estado === "running" ||
         estado === "paused" ||
         estado === "error" ||
-        !!state.rutina
+        !!state.rutina ||
+        pfCom
     );
   }
 
@@ -459,12 +506,17 @@
     const checklistReady = !!ch.ok || !!state.checklist_bypass;
 
     const sidesEl = document.querySelector("[data-cycle-param='feed_sides']");
-    const sides = sidesEl ? String(sidesEl.value || "").trim().toUpperCase() : "";
+    const sidesRaw =
+      state.feed_sides ||
+      (sidesEl ? String(sidesEl.value || "").trim() : "") ||
+      "";
+    const sides = String(sidesRaw).trim().toUpperCase();
     const piezas = parseInt(String(state.cantidad), 10);
     const ambos =
       sides === "LR" || sides === "RL" || sides === "BOTH" || sides === "AMBOS";
     const cantidadImpar =
       ambos && (!Number.isFinite(piezas) || piezas < 2 || piezas % 2 !== 0);
+    const pfCom = !!(state.prefeeder && state.prefeeder.com);
 
     const start = panel.querySelector('[data-action="start"]');
     const resume = panel.querySelector('[data-action="resume"]');
@@ -480,7 +532,6 @@
     if (start) {
       start.disabled =
         !checklistReady ||
-        !!state.carga_material ||
         purga ||
         running ||
         (paused && enCurso) ||
@@ -488,8 +539,6 @@
         enError;
       if (!checklistReady) {
         start.title = "Completa la revisión de arranque.";
-      } else if (state.carga_material) {
-        start.title = "Apaga la carga de material.";
       } else if (purga) {
         start.title = "Hay una purga en curso.";
       } else if (cantidadImpar) {
@@ -498,14 +547,13 @@
       } else if (running) {
         start.title = "El ciclo ya está en marcha.";
       } else if (enError) {
-        start.title = "Corrige el error y pulsa Borrar error.";
+        start.title = "Corrige el error y pulsa Reset.";
       } else {
         start.title = "";
       }
     }
     if (resume) {
-      resume.disabled =
-        !enCurso || !paused || purga || !!state.carga_material || enError;
+      resume.disabled = !enCurso || !paused || purga || enError;
       resume.title = resume.disabled
         ? paused && !enCurso
           ? "No hay un ciclo pausado para reanudar."
@@ -513,17 +561,19 @@
         : "Continúa el ciclo desde donde quedó.";
     }
     if (pause) {
-      pause.disabled = !running || rutina;
+      pause.disabled = (!running && !(enError && enCurso)) || rutina;
       pause.title = pause.disabled ? "Solo disponible con el ciclo en marcha." : "";
     }
     if (stop) {
-      stop.disabled = !running && !paused && !enCurso && !rutina;
-      stop.title = stop.disabled ? "" : "Detiene de inmediato el ciclo o la rutina.";
+      stop.disabled = !(running || paused || enCurso || rutina || enError || pfCom);
+      stop.title = stop.disabled
+        ? ""
+        : "Detiene el ciclo, la rutina o bloquea el PreAlimentador.";
     }
     if (reset) {
       reset.disabled = !enError;
       reset.title = enError
-        ? "Limpia el error cuando la condición ya se corrigió."
+        ? "Cuando PLC, Motion y PreAlimentador estén bien: estabiliza y limpia el error."
         : "Solo aplica cuando hay un error activo.";
     }
 
@@ -533,6 +583,25 @@
     } else if (paused && enCurso && resume && !resume.disabled) {
       resume.classList.add("is-active");
       resume.setAttribute("aria-pressed", "true");
+    }
+
+    if (els.statusBannerDetail && !enError && (estado === "idle" || estado === "paused")) {
+      let hint = "";
+      if (start && start.disabled) {
+        if (!checklistReady) {
+          hint = "Completa la revisión de arranque para poder iniciar el ciclo.";
+        } else if (cantidadImpar) {
+          hint =
+            "Lote en ambos lados (L+R): pon cantidad par de al menos 2 piezas, o cambia el ciclo a un solo lado.";
+        }
+      }
+      if (hint) {
+        els.statusBannerDetail.textContent = hint;
+        els.statusBannerDetail.classList.add("is-warn");
+      } else {
+        els.statusBannerDetail.textContent = state.mensaje || "";
+        els.statusBannerDetail.classList.remove("is-warn");
+      }
     }
   }
 
@@ -609,7 +678,14 @@
   }
 
   function formatEventLine(ev) {
-    const mark = ev.tipo === "error" ? "ERROR  " : ev.tipo === "warn" ? "AVISO  " : "";
+    const mark =
+      ev.tipo === "error"
+        ? "ERROR  "
+        : ev.tipo === "warn"
+          ? "AVISO  "
+          : ev.tipo === "prod"
+            ? "PROD   "
+            : "";
     const text = mark + (ev.texto || "");
     return ev.hora ? ev.hora + "  " + text : text;
   }
@@ -676,15 +752,6 @@
       const data = await res.json();
       if (!data.ok) return;
       populateModelSelect(data.modelos);
-      let saved = "";
-      try {
-        saved = localStorage.getItem(STORAGE_MODEL) || "";
-      } catch (e) {
-        /* ignore */
-      }
-      if (saved && modelosCatalog.some(function (m) { return m.modelo === saved; })) {
-        await selectModelo(saved, false);
-      }
     } catch (err) {
       pushLocalEvent("No se pudo cargar el catálogo de modelos.", "error");
     }
@@ -903,8 +970,11 @@
         return null;
       }
       if (!data.sent) {
-        pushLocalEvent(data.reason || "No se envió la orden Motion.", "error");
-        return null;
+        if (op !== "set_tune") {
+          pushLocalEvent(data.reason || "No se envió la orden Motion.", "error");
+          return null;
+        }
+        return data;
       }
       if (data.command_ok === false) {
         pushLocalEvent(data.error || "El MCU Motion rechazó la orden: " + op, "error");
@@ -931,7 +1001,28 @@
 
   async function saveMotionTune(ev) {
     if (ev && ev.preventDefault) ev.preventDefault();
-    await sendMotionOp("set_tune");
+    const tune = motionTuneFromForm();
+    try {
+      const res = await fetch("/api/motion/tune", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tune: tune }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        pushLocalEvent(data.error || "No se guardaron ajustes Motion.", "error");
+        return;
+      }
+      motionApplyScale(data);
+      if (data.tune) motionFormFromTune(data.tune);
+      pushLocalEvent("Ajustes Motion guardados.");
+      const pushed = await sendMotionOp("set_tune", { tune: data.tune });
+      if (pushed && pushed.sent === false) {
+        setMotionHint(pushed.reason || "Guardado en disco; sin puerto Motion para enviar al MCU.");
+      }
+    } catch (err) {
+      pushLocalEvent("Sin conexión al guardar ajustes Motion.", "error");
+    }
   }
 
   async function runMotionButton(btn) {
@@ -1050,6 +1141,7 @@
     });
     setEncoderPoll(tabId === "motion");
     setPlcPoll(tabId === "plc");
+    setPrefeederPoll(tabId === "prefeeder");
     if (tabId === "conexion") {
       loadSerialPorts();
     }
@@ -1059,25 +1151,34 @@
     if (tabId === "motion") {
       loadMotionTune();
     }
+    if (tabId === "prefeeder") {
+      loadPrefeederTune();
+    }
   }
 
   async function fetchState() {
     try {
       const res = await fetch("/api/state");
       const data = await res.json();
-      if (data.ok) applyState(data);
+      if (data.ok) {
+        applyState(data);
+        return data;
+      }
     } catch (err) {
       pushLocalEvent("No se pudo leer el estado de la máquina.", "error");
     }
+    return null;
   }
 
   function labelForAction(action) {
     const labels = {
       start: "Iniciar",
+      step_start: "Prueba paso a paso",
+      step_next: "Siguiente paso",
       resume: "Reanudar",
       pause: "Pausa",
       stop: "Stop",
-      reset: "Borrar error",
+      reset: "Reset",
       parametros: "Parámetros",
       mantenimiento: "Mantenimiento",
       checklist: "Checklist",
@@ -1088,7 +1189,6 @@
       purga_terminar: "Terminar",
       posicion_inicial: "Posición inicial",
       charola_vacia: "Charola vacía",
-      carga_material: "Carga de material",
       iniciar: "Iniciar (PreAlimentador)",
       alimentar_izquierda: "Alimentar izquierda",
       alimentar_derecha: "Alimentar derecha",
@@ -1096,6 +1196,60 @@
       omitir_holgura_derecha: "Omitir holgura derecha",
     };
     return labels[action] || action;
+  }
+
+  function syncCycleStepTestControls(state) {
+    const stepMode = !!state.ciclo_paso_a_paso;
+    const estado = state.estado || "idle";
+    const enCurso = !!state.ciclo_en_curso;
+    const enError = estado === "error" || !!state.ciclo_error;
+    const running = estado === "running";
+    const paused = estado === "paused";
+    const rutina = !!state.rutina;
+    const ch = state.checklist || {};
+    const checklistReady = !!ch.ok || !!state.checklist_bypass;
+
+    if (els.cycleStepStart) {
+      els.cycleStepStart.disabled =
+        !checklistReady || rutina || running || (paused && enCurso) || enError;
+      els.cycleStepStart.title = !checklistReady
+        ? "Completa la revisión de arranque."
+        : running || (paused && enCurso)
+          ? "Hay un ciclo en curso."
+          : enError
+            ? "Corrige el error y pulsa Reset."
+            : "Inicia una pieza y pausa al terminar cada paso.";
+    }
+    if (els.cycleStepNext) {
+      const canNext = stepMode && paused && enCurso && !enError && !rutina;
+      els.cycleStepNext.disabled = !canNext;
+      els.cycleStepNext.title = canNext
+        ? "Ejecuta el siguiente paso y vuelve a pausar."
+        : stepMode && running
+          ? "Espera a que termine el paso en curso."
+          : "Solo en pausa durante la prueba paso a paso.";
+    }
+    if (els.cycleStepStop) {
+      els.cycleStepStop.disabled = !(stepMode && (running || paused || enCurso || enError));
+      els.cycleStepStop.title = els.cycleStepStop.disabled
+        ? ""
+        : "Detiene la prueba paso a paso.";
+    }
+    if (els.cycleStepTestHint) {
+      if (stepMode && running) {
+        els.cycleStepTestHint.textContent =
+          state.mensaje || "Ejecutando paso…";
+      } else if (stepMode && paused && enCurso) {
+        els.cycleStepTestHint.textContent =
+          state.mensaje || "Paso listo. Pulsa «Siguiente paso».";
+      } else if (stepMode && enError) {
+        els.cycleStepTestHint.textContent =
+          state.ciclo_error || state.mensaje || "Error en la prueba.";
+      } else {
+        els.cycleStepTestHint.textContent =
+          "Ejecuta una pieza y se detiene al completar cada paso. Usa «Siguiente paso» para continuar.";
+      }
+    }
   }
 
   async function sendAction(block, action, extra) {
@@ -1195,6 +1349,14 @@
     el.classList.toggle("is-ok", ok === true);
   }
 
+  function showComErrorInBanner(message) {
+    if (!message || !els.statusBanner) return;
+    els.statusBanner.className =
+      "status-banner status-banner--full status-banner--error";
+    if (els.statusBannerLabel) els.statusBannerLabel.textContent = "Error";
+    if (els.statusBannerDetail) els.statusBannerDetail.textContent = message;
+  }
+
   function serialLinkText(name, port) {
     if (!port) return name + ": sin puerto. El ciclo no arranca.";
     return name + ": " + port + " guardado. Pulsa Probar COM.";
@@ -1228,6 +1390,9 @@
         value: andonNoneToken,
         label: "No usar Andon",
       });
+      if (els.selectPrefeederPort) {
+        fillPortSelect(els.selectPrefeederPort, data.ports, data.prefeeder || "");
+      }
       serialAndonSkipped = !!data.andon_skipped;
       if (!data.motion) setLinkStatus(els.serialMotionStatus, serialLinkText("Motion", ""), false);
       if (!data.plc) setLinkStatus(els.serialPlcStatus, serialLinkText("PLC", ""), false);
@@ -1236,6 +1401,13 @@
         setLinkStatus(els.serialAndonStatus, andonHint, null);
       } else if (!data.andon && !data.andon_disabled) {
         setLinkStatus(els.serialAndonStatus, serialLinkText("Andon", ""), false);
+      }
+      if (els.serialPrefeederStatus && !data.prefeeder) {
+        setLinkStatus(
+          els.serialPrefeederStatus,
+          "PreAlimentador: sin puerto (opcional).",
+          null
+        );
       }
     } catch (err) {
       if (els.serialMotionStatus) els.serialMotionStatus.textContent = "No se pudo leer la lista de puertos.";
@@ -1257,11 +1429,14 @@
           motion: els.selectMotionPort.value,
           plc: els.selectPlcPort.value,
           andon: els.selectAndonPort.value,
+          prefeeder: els.selectPrefeederPort ? els.selectPrefeederPort.value : "",
         }),
       });
       const data = await res.json();
       if (!data.ok) {
-        if (els.serialMotionStatus) els.serialMotionStatus.textContent = data.error || "No se pudo guardar el puerto.";
+        const err = data.error || "No se pudo guardar el puerto.";
+        if (els.serialMotionStatus) setLinkStatus(els.serialMotionStatus, "No guardado.", false);
+        showComErrorInBanner(err);
         await loadSerialPorts();
         return;
       }
@@ -1292,6 +1467,14 @@
             data.andon ? null : false
           );
         }
+      }
+      if (els.serialPrefeederStatus && els.selectPrefeederPort) {
+        const pf = data.prefeeder || "";
+        setLinkStatus(
+          els.serialPrefeederStatus,
+          pf ? serialLinkText("PreAlimentador", pf) : "PreAlimentador: sin puerto (opcional).",
+          pf ? null : null
+        );
       }
     } catch (err) {
       if (els.serialMotionStatus) els.serialMotionStatus.textContent = "Sin conexión con el servidor.";
@@ -1344,12 +1527,13 @@
   if (els.selectMotionPort) els.selectMotionPort.addEventListener("change", saveSerialPorts);
   if (els.selectPlcPort) els.selectPlcPort.addEventListener("change", saveSerialPorts);
   if (els.selectAndonPort) els.selectAndonPort.addEventListener("change", saveSerialPorts);
+  if (els.selectPrefeederPort) els.selectPrefeederPort.addEventListener("change", saveSerialPorts);
   async function testModuleCom(moduleName, statusEl) {
     if (moduleName === "andon" && serialAndonSkipped) {
       setLinkStatus(statusEl, "Andon no usado. No hay COM que probar.", null);
       return;
     }
-    setLinkStatus(statusEl, "Probando " + moduleName + "…", null);
+    setLinkStatus(statusEl, "Probando…", null);
     try {
       const res = await fetch("/api/serial/test", {
         method: "POST",
@@ -1359,11 +1543,14 @@
       const data = await res.json();
       if (data.ok) {
         setLinkStatus(statusEl, data.message, true);
+        fetchState();
       } else {
-        setLinkStatus(statusEl, data.error || "El COM no corresponde.", false);
+        showComErrorInBanner(data.error || "El COM no respondió.");
+        setLinkStatus(statusEl, "Sin respuesta.", false);
       }
     } catch (err) {
-      setLinkStatus(statusEl, "Sin conexión con el servidor.", false);
+      showComErrorInBanner("Sin conexión con el servidor.");
+      setLinkStatus(statusEl, "Sin conexión.", false);
     }
   }
 
@@ -1383,7 +1570,27 @@
       testModuleCom("andon", els.serialAndonStatus);
     });
   }
+  if (els.btnPrefeederTest) {
+    els.btnPrefeederTest.addEventListener("click", function () {
+      testModuleCom("prefeeder", els.serialPrefeederStatus);
+    });
+  }
   /* --- fin ANDON_SKIP_OPCIONAL (serial / conexión Andon en JS) — TODO_BORRAR --- */
+
+  if (els.prefeederTuneReload) {
+    els.prefeederTuneReload.addEventListener("click", loadPrefeederTune);
+  }
+  if (els.prefeederStatusRefresh) {
+    els.prefeederStatusRefresh.addEventListener("click", pollPrefeeder);
+  }
+  if (els.prefeederTuneForm) {
+    els.prefeederTuneForm.querySelectorAll("[data-pf-save]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const side = btn.getAttribute("data-pf-save");
+        if (side === "L" || side === "R") savePrefeederSide(side);
+      });
+    });
+  }
 
   els.btnAppSettings.addEventListener("click", openSettings);
   els.settingsModalClose.addEventListener("click", closeSettings);
@@ -1500,6 +1707,21 @@
   if (els.cycleParamsForm) {
     els.cycleParamsForm.addEventListener("submit", saveCycleParams);
   }
+  if (els.cycleStepStart) {
+    els.cycleStepStart.addEventListener("click", function () {
+      sendAction("proceso", "step_start");
+    });
+  }
+  if (els.cycleStepNext) {
+    els.cycleStepNext.addEventListener("click", function () {
+      sendAction("proceso", "step_next");
+    });
+  }
+  if (els.cycleStepStop) {
+    els.cycleStepStop.addEventListener("click", function () {
+      sendAction("proceso", "stop");
+    });
+  }
 
   const lmMoveMm = document.getElementById("lmMoveMm");
   if (lmMoveMm) {
@@ -1590,11 +1812,6 @@
         setPlcHint(reason);
       }
       if (data.status) applyPlcStatus(data.status);
-      if (data.active_errors && data.active_errors.length) {
-        data.active_errors.forEach(function (err) {
-          pushLocalEvent(err.message || err.code, "error");
-        });
-      }
       return data;
     } catch (err) {
       pushLocalEvent("Error al enviar la orden PLC.", "error");
@@ -1637,11 +1854,6 @@
       const res = await fetch("/api/plc/status");
       const data = await res.json();
       if (data.ok && data.status) applyPlcStatus(data.status);
-      if (data.ok && data.active_errors && data.active_errors.length) {
-        data.active_errors.forEach(function (err) {
-          pushLocalEvent(err.message || err.code, "error");
-        });
-      }
     } catch (err) {
       /* sin puerto: se conserva el estado de los botones */
     }
@@ -1655,6 +1867,150 @@
     if (!on) return;
     pollPlc();
     plcPollTimer = window.setInterval(pollPlc, 400);
+  }
+
+  function setPfHint(text) {
+    if (!els.prefeederEsp32Hint) return;
+    els.prefeederEsp32Hint.hidden = !text;
+    els.prefeederEsp32Hint.textContent = text || "";
+  }
+
+  function prefeederFormFromTune(tune) {
+    if (!els.prefeederTuneForm || !tune) return;
+    els.prefeederTuneForm.querySelectorAll("[data-pf-side][data-pf-key]").forEach(function (input) {
+      const side = input.getAttribute("data-pf-side");
+      const key = input.getAttribute("data-pf-key");
+      const block = tune[side];
+      if (!block || block[key] == null) return;
+      input.value = String(block[key]);
+    });
+  }
+
+  function prefeederSideFromForm(side) {
+    const out = {};
+    if (!els.prefeederTuneForm) return out;
+    els.prefeederTuneForm.querySelectorAll('[data-pf-side="' + side + '"][data-pf-key]').forEach(function (input) {
+      const key = input.getAttribute("data-pf-key");
+      const raw = input.value.trim();
+      if (raw === "") return;
+      const num = Number(raw);
+      if (!Number.isFinite(num)) return;
+      out[key] = num;
+    });
+    return out;
+  }
+
+  function pfPaintBanner(el, sideData) {
+    if (!el) return;
+    if (!sideData || !sideData.online) {
+      el.textContent = sideData ? "Sin enlace" : "—";
+      return;
+    }
+    if (sideData.state === "error") {
+      el.textContent = "—";
+      return;
+    }
+    if (sideData.state === "busy") {
+      el.textContent = "Busy";
+      return;
+    }
+    el.textContent = "Idle";
+  }
+
+  function pfPaintSensor(ledEl, on, faultStyle) {
+    if (!ledEl) return;
+    const state = ledEl.querySelector(".motion-laser__state");
+    const label = on ? (faultStyle ? "Activo" : "OK") : "Off";
+    ledEl.classList.toggle("is-on", !!on);
+    ledEl.classList.toggle("is-fault", !!(on && faultStyle));
+    if (state) state.textContent = label;
+  }
+
+  function applyPrefeederStatus(status) {
+    if (!status) return;
+    const tuneFromMaster = {};
+    ["L", "R"].forEach(function (side) {
+      const block = status[side];
+      pfPaintBanner(side === "L" ? els.pfBanL : els.pfBanR, block);
+      const sen = (block && block.sensors) || {};
+      pfPaintSensor(document.getElementById("pfCyl" + side), !!sen.cylinder, true);
+      pfPaintSensor(document.getElementById("pfHose" + side), !!sen.hose, true);
+      pfPaintSensor(document.getElementById("pfHolg" + side), !!sen.holgura, false);
+      if (block && block.cfg) tuneFromMaster[side] = block.cfg;
+    });
+    // Leer actuales del maestro sin pisar si el operador está editando.
+    if (els.prefeederTuneForm && Object.keys(tuneFromMaster).length) {
+      const active = document.activeElement;
+      const editing = !!(active && els.prefeederTuneForm.contains(active));
+      if (!editing) prefeederFormFromTune(tuneFromMaster);
+    }
+  }
+
+  async function loadPrefeederTune() {
+    try {
+      const res = await fetch("/api/prefeeder/tune");
+      const data = await res.json();
+      if (data.ok && data.tune) prefeederFormFromTune(data.tune);
+    } catch (err) {
+      pushLocalEvent("No se pudo cargar parámetros del PreAlimentador.", "error");
+    }
+    await pollPrefeeder();
+  }
+
+  async function savePrefeederSide(side) {
+    const patch = {};
+    patch[side] = prefeederSideFromForm(side);
+    try {
+      const res = await fetch("/api/prefeeder/tune", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tune: patch }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        pushLocalEvent(data.error || "No se guardó el lado " + side + ".", "error");
+        return;
+      }
+      if (data.tune) prefeederFormFromTune(data.tune);
+      const pushed = data.pushed && data.pushed[side];
+      const applied = data.applied && data.applied[side];
+      if (applied === false) {
+        setPfHint("No quedó aplicado en el maestro (revisa COM). Los valores no se guardaron en el ESP32.");
+        pushLocalEvent(
+          "PreAlimentador " + side + ": el maestro no refleja los parámetros guardados.",
+          "error"
+        );
+      } else if (!pushed) {
+        setPfHint("Sin respuesta del maestro por serial; no se guardó en el ESP32.");
+        pushLocalEvent("No se confirmó el envío al maestro (" + side + ").", "error");
+      } else {
+        setPfHint("Guardado en el maestro. Solo cambiará con otro Guardar desde el HMI.");
+        pushLocalEvent("PreAlimentador " + side + " guardado en el maestro.");
+      }
+      await pollPrefeeder();
+    } catch (err) {
+      pushLocalEvent("Error al guardar PreAlimentador " + side + ".", "error");
+    }
+  }
+
+  async function pollPrefeeder() {
+    try {
+      const res = await fetch("/api/prefeeder/status?force=1");
+      const data = await res.json();
+      if (data.ok && data.status) applyPrefeederStatus(data.status);
+    } catch (err) {
+      /* sin puerto */
+    }
+  }
+
+  function setPrefeederPoll(on) {
+    if (pfPollTimer) {
+      window.clearInterval(pfPollTimer);
+      pfPollTimer = null;
+    }
+    if (!on) return;
+    pollPrefeeder();
+    pfPollTimer = window.setInterval(pollPrefeeder, 700);
   }
 
   if (els.plcManualForm) {
@@ -1709,6 +2065,8 @@
     if (!btn) return;
     btn.classList.toggle("is-active", !!on);
     btn.setAttribute("aria-pressed", on ? "true" : "false");
+    /* flashButton puede dejar is-vivid si is-active llega antes del timeout */
+    btn.classList.remove("is-vivid");
   }
 
   function syncHolgura(action, on, lado) {
@@ -1733,15 +2091,22 @@
       home.disabled = !!state.rutina_manos || cicloCorriendo || (!!rutina && rutina !== "purga");
       setButtonOn(home, rutina === "posicion_inicial");
     }
-    const carga = actionButton("carga_material");
-    if (carga) {
-      carga.disabled = purga;
-      setButtonOn(carga, !!state.carga_material);
-    }
-    setButtonOn(actionButton("alimentar_izquierda"), rutina === "alimentar" && fase === "L");
-    setButtonOn(actionButton("alimentar_derecha"), rutina === "alimentar" && fase === "R");
     syncHolgura("omitir_holgura_izquierda", !!state.omitir_holgura_l, "izquierda");
     syncHolgura("omitir_holgura_derecha", !!state.omitir_holgura_r, "derecha");
+
+    const pfIniciar = document.querySelector('[data-block="prealimentador"] [data-action="iniciar"]');
+    if (pfIniciar) {
+      const pf = state.prefeeder || {};
+      if (pf.com === false) {
+        pfIniciar.title = "Sin COM del maestro (estabilización omitida).";
+      } else if (pf.ready) {
+        pfIniciar.title = "Ya está listo y bloqueado.";
+      } else if (pf.com && !pf.stable) {
+        pfIniciar.title = "Estabiliza ambos lados y bloquea.";
+      } else {
+        pfIniciar.title = "Estabiliza y bloquea el PreAlimentador.";
+      }
+    }
 
     if (els.statusBannerDetail) {
       els.statusBannerDetail.classList.toggle("is-warn", !!state.rutina_manos);
@@ -1857,7 +2222,8 @@
       actions.appendChild(checkButton("Hacer recorrido", "checklist_recorrido", !ch.eje_ok || !!state.rutina));
       actions.appendChild(checkButton("Regresó bien", "checklist_eje_listo", !ch.eje_ok || !ch.recorrido_ok));
     } else if (paso === 5) {
-      hint.textContent = "Paso 5 de 6. Prepara los alimentadores y haz la purga. Alimentar, Limpiar, Continuar y Terminar quedan en el banner superior.";
+      hint.textContent =
+        "Paso 5 de 6. Prepara los alimentadores CAN y, si hay COM del PreAlimentador, estabilízalo. Luego la purga. Alimentar, Limpiar, Continuar y Terminar quedan en el banner superior.";
       actions.appendChild(checkButton("Preparar alimentador", "checklist_preparar", !!state.rutina));
       actions.appendChild(checkButton("Hacer purga", "checklist_purga", !ch.alimentador_ok || !!state.rutina));
       actions.appendChild(checkButton("Purga lista", "checklist_purga_hecha", !ch.purga_ok));
@@ -1952,10 +2318,46 @@
     });
   }
 
+  document.querySelectorAll("[data-pf-hold]").forEach(function (btn) {
+    const side = btn.getAttribute("data-pf-hold");
+    if (side !== "L" && side !== "R") return;
+    let held = false;
+    async function setForce(on) {
+      if (held === on) return;
+      held = on;
+      setButtonOn(btn, on);
+      try {
+        await fetch("/api/prefeeder/cmd", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ op: "set_force_feed", side: side, on: on }),
+        });
+      } catch (err) {
+        /* sin servidor */
+      }
+    }
+    btn.addEventListener("pointerdown", function (ev) {
+      ev.preventDefault();
+      try {
+        btn.setPointerCapture(ev.pointerId);
+      } catch (e) {
+        /* ignore */
+      }
+      setForce(true);
+    });
+    function release() {
+      setForce(false);
+    }
+    btn.addEventListener("pointerup", release);
+    btn.addEventListener("pointercancel", release);
+    btn.addEventListener("lostpointercapture", release);
+  });
+
   document.querySelectorAll("[data-block]").forEach(function (container) {
     const block = container.dataset.block;
     container.querySelectorAll("[data-action]").forEach(function (btn) {
       btn.addEventListener("click", function () {
+        if (btn.hasAttribute("data-pf-hold")) return;
         const action = btn.dataset.action;
         flashButton(btn);
 
@@ -1992,5 +2394,11 @@
 
   loadThemePreference();
   loadEventsPreference();
-  loadModelos().then(restoreMeasureComp).then(fetchState).then(loadCycleConfig);
+  loadModelos()
+    .then(fetchState)
+    .then(function (state) {
+      syncUiFromPersistedState(state);
+      return maybeRestoreModelFromLocal();
+    })
+    .then(loadCycleConfig);
 })();

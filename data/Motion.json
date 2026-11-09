@@ -1,19 +1,19 @@
 {
   "feeder": {
     "R": {
-      "profile_velocity_pps": 5236,
+      "profile_velocity_pps": 1964,
       "target_position_counts": 42500,
       "compensation_mm": 0.0
     },
     "L": {
-      "profile_velocity_pps": 5236,
+      "profile_velocity_pps": 1964,
       "target_position_counts": 42500,
       "compensation_mm": 0.0
     }
   },
   "lmguide": {
-    "pr_speed_rpm": 3000.0,
-    "pos_puu": -4380
+    "pr_speed_rpm": 1500.0,
+    "pos_puu": -17111
   },
   "feed_stage": {
     "validate_encoder": false

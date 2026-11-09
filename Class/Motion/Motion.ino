@@ -1225,10 +1225,13 @@ static bool lmguideWaitForTarget(int32_t targetPuu, float tolMm, uint32_t timeou
 
 static bool lmguideMovePr1(int32_t targetPuu) {
   gLmAbortRequested = false;
+  // Fuera de cero: ya no estamos en home lógico (aunque el flag hubiera quedado pegado).
+  if (targetPuu != 0) gRt.lmguideHomed = false;
   for (uint8_t attempt = 1; attempt <= PARAM_LM_MOVE_MAX_ATTEMPTS; attempt++) {
     if (!lmguideIssueMovePr1(targetPuu)) return false;
     if (lmguideWaitForTarget(targetPuu, PARAM_LM_MOVE_TOLERANCE_MM, PARAM_LM_MOVE_DONE_TIMEOUT_MS)) {
       gRt.lmguideServoOn = true;
+      if (targetPuu == 0) gRt.lmguideHomed = true;
       return true;
     }
     if (gLmAbortRequested) return false;
@@ -1350,9 +1353,8 @@ static bool lmguideMoveNamed(const char* name) {
   if (!name) return false;
   if (strncmp(name, "model", 5) == 0) return lmguideMoveModel();
   if (strncmp(name, "home", 4) == 0) {
-    bool ok = lmguideMovePr1(0);
-    if (ok) gRt.lmguideHomed = true;
-    return ok;
+    // PUU 0 absoluto (P6.002 TYPE=2 OPT=ABS). No es homing mecánico.
+    return lmguideMovePr1(0);
   }
   if (!gRt.lmguideHomed) return false;
   return lmguideMovePr1(gTune.lmguide.posPuu);

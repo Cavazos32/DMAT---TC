@@ -1,5 +1,6 @@
 {
   "ms_holder_enc_stable": 100,
+  "ms_after_feed": 100,
   "ms_lm_at_cut": 100,
   "ms_lm_at_discharge": 100,
   "ms_cutter_on": 50,
@@ -8,12 +9,14 @@
   "ms_blower_delay": 200,
   "ms_at_home_end": 50,
   "tolerance_mm": 2.0,
-  "cut_offset_mm": 0.0,
+  "cut_offset_mm": 3.0,
   "deposit_batch_size": 50,
   "deposit_stack_gap_mm": 100.0,
   "deposit_max_travel_mm": 1500.0,
   "gripper_clearance_mm": 20.0,
   "feed_sides": "LR",
   "blower_ms_per_mm": 8.0,
-  "blower_ms_min": 200
+  "blower_ms_min": 200,
+  "cantidad": 10,
+  "numero_modelo": "MDL-2048-A"
 }

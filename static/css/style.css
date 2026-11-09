@@ -568,6 +568,45 @@ body {
   box-shadow: var(--shadow);
 }
 
+.pf-status {
+  margin: 0 0 0.65rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
+.pf-status--params {
+  margin-bottom: 1rem;
+}
+
+.pf-status[data-tone="ok"] {
+  color: var(--btn-start-pastel-fg);
+  border-color: var(--btn-start-pastel-border);
+  background: var(--btn-start-pastel);
+}
+
+.pf-status[data-tone="active"] {
+  color: var(--btn-feeder-pastel-fg);
+  border-color: var(--btn-feeder-pastel-border);
+  background: var(--btn-feeder-pastel);
+}
+
+.pf-status[data-tone="warn"] {
+  color: var(--btn-pause-pastel-fg);
+  border-color: var(--btn-pause-pastel-border);
+  background: var(--btn-pause-pastel);
+}
+
+.pf-status[data-tone="error"] {
+  color: var(--btn-stop-pastel-fg);
+  border-color: var(--btn-stop-pastel-border);
+  background: var(--btn-stop-pastel);
+}
+
 .panel-title {
   margin: 0 0 1rem;
   font-size: 0.75rem;
@@ -1007,6 +1046,26 @@ body {
 
 .cycle-params {
   margin-top: 0.5rem;
+}
+
+.cycle-step-test {
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-elevated);
+}
+
+.cycle-step-test .cycle-params__title {
+  margin-top: 0;
+}
+
+.cycle-step-test .modal__hint {
+  margin: 0 0 0.75rem;
+}
+
+.cycle-step-test .motion-params__actions {
+  margin-bottom: 0;
 }
 
 .motion-params__actions {
