@@ -10,6 +10,9 @@
   "ms_at_home_end": 50,
   "tolerance_mm": 2.0,
   "cut_offset_mm": 2.5,
+  "cut_comp_mode": true,
+  "cut_comp_r_mm": 0.5,
+  "cut_comp_l_mm": 1.2,
   "deposit_batch_size": 50,
   "deposit_stack_gap_mm": 100.0,
   "deposit_max_travel_mm": 1500.0,
@@ -17,6 +20,6 @@
   "feed_sides": "LR",
   "blower_ms_per_mm": 8.0,
   "blower_ms_min": 200,
-  "cantidad": 100,
+  "cantidad": 2,
   "numero_modelo": "MDL-2048-A"
 }

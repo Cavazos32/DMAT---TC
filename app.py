@@ -133,6 +133,10 @@ _LOT = {
     "deposits_per_tray": 0,
     "batch_size": 50,
     "cut_mm": 0.0,
+    "cut_offset_mm": 0.0,
+    "cut_comp_mode": False,
+    "cut_comp_r_mm": 0.0,
+    "cut_comp_l_mm": 0.0,
     "length_mm": 0.0,
     "gap_mm": 0.0,
     "clearance_mm": 0.0,
@@ -362,7 +366,10 @@ _DEFAULT_CYCLE_PARAMS = {
     "ms_blower_delay": 200,
     "ms_at_home_end": 50,
     "tolerance_mm": 2.0,
-    "cut_offset_mm": 0.0,
+    "cut_offset_mm": 0.0,  # compensación general (modo dual apagado)
+    "cut_comp_mode": False,
+    "cut_comp_r_mm": 0.0,
+    "cut_comp_l_mm": 0.0,
     "deposit_batch_size": 50,
     "deposit_stack_gap_mm": 100.0,
     "deposit_max_travel_mm": 1500.0,
@@ -391,7 +398,7 @@ _MACHINE_STATE = {
     "numero_modelo": "",
     "cantidad": 1,
     "longitud_modelo_mm": None,
-    "compensacion_medicion_mm": 0.0,
+    "compensacion_medicion_mm": 0.0,  # compensación general; se usa si cut_comp_mode está apagado
     "tiempo_ciclo_s": None,
     "tiempo_estimado_s": 0,
     "tiempo_corriendo_s": 0,
@@ -621,22 +628,170 @@ def _feed_sides_of(params: dict) -> str:
     return "R"
 
 
+def _parse_bool(value, default: bool = False) -> bool:
+    """Convierte checkbox/JSON suelto a bool. No confundir con _as_bool(src, path, default)."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on", "si", "sí"):
+        return True
+    if text in ("0", "false", "no", "off", ""):
+        return False
+    return default
+
+
 def _measure_comp_mm() -> float:
-    """Compensación de medición (= offset de corte LM Guide). Fuente única: pantalla principal."""
-    with _STATE_LOCK:
-        return _num(_MACHINE_STATE.get("compensacion_medicion_mm"), 0.0)
+    """Compensación general de corte (pantalla principal). Se usa con modo dual apagado."""
+    # Sin lock: lectura de float; evita deadlock si se llama desde _public_machine_state.
+    return _num(_MACHINE_STATE.get("compensacion_medicion_mm"), 0.0)
 
 
 def _mirror_comp_to_cycle_json(mm: float) -> None:
-    """Mantiene cut_offset_mm en cycle.json alineado (mismo valor, solo compatibilidad)."""
+    """Mantiene cut_offset_mm en cycle.json alineado con la compensación general."""
     _ = mm
     _save_hmi_cycle_extras()
 
 
+def _cut_base_mm(length: float) -> float:
+    """Posición base de corte: |largo| − 55 mm (sin compensación)."""
+    return abs(length) - LMGUIDE_PIECE_OFFSET_MM
+
+
+def _cut_comp_side_mm(params: dict, side: str) -> float:
+    if side == "R":
+        return _num(params.get("cut_comp_r_mm"), 0.0)
+    return _num(params.get("cut_comp_l_mm"), 0.0)
+
+
+def _general_cut_comp_mm(params: dict | None = None) -> float:
+    """Offset general vivo del HMI. En lote activo se congela con _lot_cut_offset."""
+    if isinstance(params, dict) and params.get("_lot_cut_offset") is not None:
+        return _num(params.get("_lot_cut_offset"), 0.0)
+    return _measure_comp_mm()
+
+
+def _cut_comp_params_of(params: dict | None = None) -> dict:
+    src = params if isinstance(params, dict) else _load_cycle_params()
+    return {
+        "cut_comp_mode": _parse_bool(src.get("cut_comp_mode"), False),
+        "cut_comp_r_mm": _num(src.get("cut_comp_r_mm"), 0.0),
+        "cut_comp_l_mm": _num(src.get("cut_comp_l_mm"), 0.0),
+        "cut_offset_mm": _general_cut_comp_mm(src),
+    }
+
+
+def _build_cut_plan(length: float, params: dict | None, sides: str) -> dict:
+    """
+    Plan de corte LM Guide.
+    - Modo off: un solo movimiento a base + compensación general.
+    - Modo on + un lado: base + compensación de ese lado (sin general).
+    - Modo on + LR y compensaciones distintas: primero el offset menor, luego el mayor.
+    - Modo on + LR e iguales: un movimiento a base+offset; ambos cortadores.
+    last_mm es la última posición de corte (referencia de depósito/despeje).
+    """
+    base = _cut_base_mm(length)
+    sides = str(sides or "R").strip().upper()
+    if sides not in ("R", "L", "LR"):
+        sides = "R"
+    comps = _cut_comp_params_of(params)
+    mode = bool(comps["cut_comp_mode"])
+    general = float(comps["cut_offset_mm"]) if not mode else 0.0
+    comp_r = float(comps["cut_comp_r_mm"]) if mode else 0.0
+    comp_l = float(comps["cut_comp_l_mm"]) if mode else 0.0
+
+    def side_name(side: str) -> str:
+        return {"R": "derecho", "L": "izquierdo", "LR": "L y R"}[side]
+
+    def valve_of(side: str) -> str:
+        return {"R": "cutter_r", "L": "cutter_l", "LR": "cutters"}[side]
+
+    def single(side: str, mm: float) -> dict:
+        return {
+            "mode": mode,
+            "sequential": False,
+            "base_mm": base,
+            "general_mm": general,
+            "last_mm": mm,
+            "first_side": side,
+            "first_mm": mm,
+            "first_valve": valve_of(side),
+            "first_label": side_name(side),
+            "second_side": "",
+            "second_mm": mm,
+            "second_valve": "",
+            "second_label": "",
+            "comp_r_mm": comp_r,
+            "comp_l_mm": comp_l,
+        }
+
+    if not mode:
+        mm = base + general
+        return single(sides if sides in ("R", "L") else "LR", mm)
+
+    if sides == "R":
+        return single("R", base + comp_r)
+    if sides == "L":
+        return single("L", base + comp_l)
+
+    # Ambos lados, modo on.
+    applicable = abs(comp_r - comp_l) >= 0.001
+    if not applicable:
+        return single("LR", base + comp_r)
+
+    # Offset menor primero, mayor al final (despeje sobre la última posición).
+    first_side, second_side = ("R", "L") if comp_r <= comp_l else ("L", "R")
+    first_comp = comp_r if first_side == "R" else comp_l
+    second_comp = comp_r if second_side == "R" else comp_l
+    first_mm = base + first_comp
+    second_mm = base + second_comp
+    return {
+        "mode": mode,
+        "sequential": True,
+        "base_mm": base,
+        "general_mm": 0.0,
+        "last_mm": second_mm,
+        "first_side": first_side,
+        "first_mm": first_mm,
+        "first_valve": valve_of(first_side),
+        "first_label": side_name(first_side),
+        "second_side": second_side,
+        "second_mm": second_mm,
+        "second_valve": valve_of(second_side),
+        "second_label": side_name(second_side),
+        "comp_r_mm": comp_r,
+        "comp_l_mm": comp_l,
+    }
+
+
 def _cut_mm_of(length: float, params: dict | None = None) -> float:
-    """Corte LM Guide: |largo| − 55 mm + compensación de medición."""
-    _ = params  # cycle.json cut_offset_mm obsoleto; misma magnitud que compensación.
-    return abs(length) - LMGUIDE_PIECE_OFFSET_MM + _measure_comp_mm()
+    """Última posición de corte (referencia de depósito/despeje)."""
+    src = params if isinstance(params, dict) else _load_cycle_params()
+    plan = _build_cut_plan(length, src, _feed_sides_of(src))
+    return float(plan["last_mm"])
+
+
+def _active_cut_plan() -> dict | None:
+    """Plan de corte del ciclo en curso. None si no hay longitud."""
+    if _LOT["active"]:
+        length = float(_LOT.get("length_mm") or 0.0)
+        if length <= 0:
+            return None
+        params = {
+            "_lot_cut_offset": _LOT.get("cut_offset_mm"),
+            "cut_comp_mode": _LOT.get("cut_comp_mode"),
+            "cut_comp_r_mm": _LOT.get("cut_comp_r_mm"),
+            "cut_comp_l_mm": _LOT.get("cut_comp_l_mm"),
+        }
+        return _build_cut_plan(length, params, _LOT.get("sides") or "R")
+    params = _load_cycle_params()
+    length = _target_length_mm()
+    if length <= 0:
+        return None
+    return _build_cut_plan(length, params, _feed_sides_of(params))
 
 
 def _clear_of(deposit: float, clearance: float) -> float:
@@ -2393,9 +2548,13 @@ def _load_cycle_params():
 
 
 def _save_hmi_cycle_extras() -> None:
-    """Cantidad, modelo y compensación en cycle.json para sobrevivir al reinicio del HMI."""
+    """Cantidad, modelo y compensación general en cycle.json."""
     try:
         params = _load_cycle_params()
+        comps = _cut_comp_params_of(params)
+        params["cut_comp_mode"] = comps["cut_comp_mode"]
+        params["cut_comp_r_mm"] = comps["cut_comp_r_mm"]
+        params["cut_comp_l_mm"] = comps["cut_comp_l_mm"]
         params["cut_offset_mm"] = _measure_comp_mm()
         try:
             params["cantidad"] = max(1, int(_MACHINE_STATE.get("cantidad") or 1))
@@ -2419,6 +2578,10 @@ def _hydrate_hmi_from_cycle() -> None:
     except (TypeError, ValueError):
         qty = 1
     _MACHINE_STATE["cantidad"] = max(1, qty)
+    comps = _cut_comp_params_of(params)
+    params["cut_comp_mode"] = comps["cut_comp_mode"]
+    params["cut_comp_r_mm"] = comps["cut_comp_r_mm"]
+    params["cut_comp_l_mm"] = comps["cut_comp_l_mm"]
     comp = _num(params.get("cut_offset_mm"), 0.0)
     _MACHINE_STATE["compensacion_medicion_mm"] = comp
     _MOTION_DATA["measure_comp_mm"] = comp
@@ -2582,7 +2745,36 @@ def _public_machine_state() -> dict:
             state["tiempo_estimado_s"] = None
         if lote_vivo or state.get("ciclo_en_curso"):
             state["tiempo_corriendo_s"] = corriendo_s
-        state["feed_sides"] = _feed_sides_of(_load_cycle_params())
+        params = _load_cycle_params()
+        # Incluir compensación general actual para el plan (evita leer estado otra vez).
+        params = dict(params)
+        params["cut_offset_mm"] = _num(
+            state.get("compensacion_medicion_mm"),
+            _num(params.get("cut_offset_mm"), 0.0),
+        )
+        comps = _cut_comp_params_of(params)
+        state["feed_sides"] = _feed_sides_of(params)
+        state["cut_comp_mode"] = comps["cut_comp_mode"]
+        state["cut_comp_r_mm"] = comps["cut_comp_r_mm"]
+        state["cut_comp_l_mm"] = comps["cut_comp_l_mm"]
+        length = _num(state.get("longitud_modelo_mm"), 0.0)
+        if length > 0:
+            plan = _build_cut_plan(length, params, state["feed_sides"])
+            state["cut_base_mm"] = plan["base_mm"]
+            if comps["cut_comp_mode"]:
+                state["cut_mm_r"] = plan["base_mm"] + comps["cut_comp_r_mm"]
+                state["cut_mm_l"] = plan["base_mm"] + comps["cut_comp_l_mm"]
+            else:
+                state["cut_mm_r"] = plan["last_mm"]
+                state["cut_mm_l"] = plan["last_mm"]
+            state["cut_mm_last"] = plan["last_mm"]
+            state["cut_comp_sequential"] = bool(plan["sequential"])
+        else:
+            state["cut_base_mm"] = None
+            state["cut_mm_r"] = None
+            state["cut_mm_l"] = None
+            state["cut_mm_last"] = None
+            state["cut_comp_sequential"] = False
         state["prefeeder"] = _prefeeder_public_summary()
         state["ciclo_paso_a_paso"] = bool(_CYCLE_CTRL.get("step_mode"))
         return state
@@ -3271,31 +3463,60 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         return True
 
-    # Step 5. LM Guide a |L| − 55 mm + offset de corte; esperar en corte.
+    # Step 5. LM Guide a primera (o única) posición de corte; esperar.
     if step_id == "5":
-        pos = _active_cut_deposit()
-        if pos is None:
+        plan = _active_cut_plan()
+        if plan is None:
             _cycle_fail("E007")
             return False
-        cut_mm, _disc_mm, _stack = pos
-        _push_event(f"LM Guide a corte: {cut_mm:.2f} mm.")
+        cut_mm = float(plan["first_mm"])
+        if plan.get("sequential"):
+            _push_event(
+                f"LM Guide a corte 1/{plan['first_label']}: {cut_mm:.2f} mm "
+                f"(comp R {plan['comp_r_mm']:+.2f} / L {plan['comp_l_mm']:+.2f})."
+            )
+        else:
+            _push_event(f"LM Guide a corte: {cut_mm:.2f} mm.")
         if not _cycle_move_lm_mm(cut_mm):
             return False
         return _cycle_sleep_ms(int(params["ms_lm_at_cut"]))
 
-    # Step 6. Pulsar el cortador del lado que alimenta. Ambos lados pulsan los dos.
+    # Step 6. Cortar en la posición actual; si hay compensación dual aplicable,
+    # mover a la segunda posición (offset mayor) y cortar el otro lado.
     if step_id == "6":
-        sides = _run_sides()
-        valve = {"R": "cutter_r", "L": "cutter_l", "LR": "cutters"}[sides]
-        side_name = {"R": "derecho", "L": "izquierdo", "LR": "L y R"}[sides]
-        _set_machine_ui(mensaje=_cycle_piece_prefix() + f"Corte {side_name}.")
-        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": True}), "E019"):
+        plan = _active_cut_plan()
+        if plan is None:
+            _cycle_fail("E007")
             return False
-        if not _cycle_sleep_ms(int(params["ms_cutter_on"])):
+
+        def pulse_cutter(valve: str, label: str) -> bool:
+            _set_machine_ui(mensaje=_cycle_piece_prefix() + f"Corte {label}.")
+            if not _plc_cmd_ok(
+                _cycle_plc_send({"op": "valve", "name": valve, "on": True}), "E019"
+            ):
+                return False
+            if not _cycle_sleep_ms(int(params["ms_cutter_on"])):
+                return False
+            if not _plc_cmd_ok(
+                _cycle_plc_send({"op": "valve", "name": valve, "on": False}), "E019"
+            ):
+                return False
+            return _cycle_sleep_ms(int(params["ms_after_cutter"]))
+
+        if not pulse_cutter(str(plan["first_valve"]), str(plan["first_label"])):
             return False
-        if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": valve, "on": False}), "E019"):
+        if not plan.get("sequential"):
+            return True
+
+        second_mm = float(plan["second_mm"])
+        _push_event(
+            f"LM Guide a corte 2/{plan['second_label']}: {second_mm:.2f} mm."
+        )
+        if not _cycle_move_lm_mm(second_mm):
             return False
-        return _cycle_sleep_ms(int(params["ms_after_cutter"]))
+        if not _cycle_sleep_ms(int(params["ms_lm_at_cut"])):
+            return False
+        return pulse_cutter(str(plan["second_valve"]), str(plan["second_label"]))
 
     # Step 7. LM Guide al depósito del montón; liberar pinzas; esperar.
     if step_id == "7":
@@ -4224,6 +4445,11 @@ def _cycle_start(*, step_mode: bool = False) -> tuple[bool, str]:
         _LOT["deposits_per_tray"] = plan["deposits"]
         _LOT["batch_size"] = plan["batch_size"]
         _LOT["cut_mm"] = plan["cut_mm"]
+        cut_comps = _cut_comp_params_of(params)
+        _LOT["cut_offset_mm"] = _measure_comp_mm()
+        _LOT["cut_comp_mode"] = cut_comps["cut_comp_mode"]
+        _LOT["cut_comp_r_mm"] = cut_comps["cut_comp_r_mm"]
+        _LOT["cut_comp_l_mm"] = cut_comps["cut_comp_l_mm"]
         _LOT["length_mm"] = plan["length_mm"]
         _LOT["gap_mm"] = plan["gap_mm"]
         _LOT["clearance_mm"] = plan["clearance_mm"]
@@ -5758,6 +5984,10 @@ def api_errors():
 def cycle_config():
     if request.method == "GET":
         params = _load_cycle_params()
+        comps = _cut_comp_params_of(params)
+        params["cut_comp_mode"] = comps["cut_comp_mode"]
+        params["cut_comp_r_mm"] = comps["cut_comp_r_mm"]
+        params["cut_comp_l_mm"] = comps["cut_comp_l_mm"]
         params["cut_offset_mm"] = _measure_comp_mm()
         return jsonify(
             {
@@ -5777,25 +6007,29 @@ def cycle_config():
         if key in patch and patch[key] is not None:
             params[key] = patch[key]
     params["feed_sides"] = _feed_sides_of(params)
-    if "cut_offset_mm" in patch:
-        try:
-            comp = float(patch["cut_offset_mm"])
-        except (TypeError, ValueError):
-            comp = 0.0
-        _MACHINE_STATE["compensacion_medicion_mm"] = comp
-        _MOTION_DATA["measure_comp_mm"] = comp
-        params["cut_offset_mm"] = comp
+    if "cut_comp_mode" in patch:
+        params["cut_comp_mode"] = _parse_bool(patch.get("cut_comp_mode"), False)
+    for key in ("cut_comp_r_mm", "cut_comp_l_mm"):
+        if key in patch and patch[key] is not None:
+            params[key] = _num(patch.get(key), 0.0)
+    comps = _cut_comp_params_of(params)
+    params["cut_comp_mode"] = comps["cut_comp_mode"]
+    params["cut_comp_r_mm"] = comps["cut_comp_r_mm"]
+    params["cut_comp_l_mm"] = comps["cut_comp_l_mm"]
+    # La compensación general se edita en pantalla principal; no se pisa aquí.
+    params["cut_offset_mm"] = _measure_comp_mm()
     for key in (
         "deposit_stack_gap_mm",
         "deposit_max_travel_mm",
         "gripper_clearance_mm",
         "tolerance_mm",
         "blower_ms_per_mm",
+        "cut_comp_r_mm",
+        "cut_comp_l_mm",
     ):
         params[key] = _num(params.get(key), _DEFAULT_CYCLE_PARAMS[key])
     params["deposit_batch_size"] = int(_num(params.get("deposit_batch_size"), 50))
     _MOTION_DATA["tolerance_mm"] = _num(params.get("tolerance_mm"), 2.0)
-    params["cut_offset_mm"] = _measure_comp_mm()
     try:
         params["cantidad"] = max(1, int(_MACHINE_STATE.get("cantidad") or 1))
     except (TypeError, ValueError):
@@ -5809,7 +6043,14 @@ def cycle_config():
         )
     except OSError:
         return jsonify({"ok": False, "error": "No se pudo guardar cycle.json"}), 500
-    return jsonify({"ok": True, "steps": list(CYCLE_STEPS), "params": params})
+    return jsonify(
+        {
+            "ok": True,
+            "steps": list(CYCLE_STEPS),
+            "params": params,
+            "state": _public_machine_state(),
+        }
+    )
 
 
 @app.route("/api/motion/tune", methods=["GET", "POST"])
@@ -6011,6 +6252,7 @@ def motion_data():
         except (TypeError, ValueError):
             comp = 0.0
         _MACHINE_STATE["compensacion_medicion_mm"] = comp
+        _MOTION_DATA["measure_comp_mm"] = comp
         _mirror_comp_to_cycle_json(comp)
     flat = _motion_data_flat(_MOTION_DATA)
     return jsonify({"ok": True, "data": dict(_MOTION_DATA), "esp32_line": flat})

@@ -252,6 +252,34 @@
     }
   }
 
+  function formatCutPreview(state) {
+    const len = Number(state && state.longitud_modelo_mm);
+    if (!Number.isFinite(len) || len <= 0) return "";
+    const base =
+      state.cut_base_mm != null
+        ? Number(state.cut_base_mm)
+        : len - LM_PIECE_OFFSET_MM;
+    const mode = !!state.cut_comp_mode;
+    if (!mode) {
+      const last =
+        state.cut_mm_last != null
+          ? Number(state.cut_mm_last)
+          : base + (Number(state.compensacion_medicion_mm) || 0);
+      return Number.isFinite(last) ? last.toFixed(2) : "";
+    }
+    const compR = Number(state.cut_comp_r_mm);
+    const compL = Number(state.cut_comp_l_mm);
+    const cutR = base + (Number.isFinite(compR) ? compR : 0);
+    const cutL = base + (Number.isFinite(compL) ? compL : 0);
+    return (
+      base.toFixed(2) +
+      " | R " +
+      cutR.toFixed(2) +
+      " | L " +
+      cutL.toFixed(2)
+    );
+  }
+
   async function maybeRestoreModelFromLocal() {
     if (!els.selectModelo || els.selectModelo.value) return;
     let saved = "";
@@ -349,10 +377,7 @@
     syncModelSelect(state.numero_modelo || "");
     els.metricLongitud.textContent = formatMm(state.longitud_modelo_mm);
     if (els.cycleCutMm) {
-      const len = Number(state.longitud_modelo_mm);
-      const off = Number(state.compensacion_medicion_mm);
-      const cut = len - LM_PIECE_OFFSET_MM + (Number.isFinite(off) ? off : 0);
-      els.cycleCutMm.value = Number.isFinite(len) && len > 0 ? cut.toFixed(2) : "";
+      els.cycleCutMm.value = formatCutPreview(state);
     }
     setCantidadInput(
       state.cantidad,
@@ -432,6 +457,10 @@
     els.cycleParamsForm.querySelectorAll("[data-cycle-param]").forEach(function (input) {
       const key = input.dataset.cycleParam;
       const val = params[key];
+      if (input.type === "checkbox") {
+        input.checked = !!val && val !== 0 && val !== "0" && val !== "false";
+        return;
+      }
       if (val == null || val === "") {
         input.value = "";
         return;
@@ -460,6 +489,10 @@
     const params = {};
     els.cycleParamsForm.querySelectorAll("[data-cycle-param]").forEach(function (input) {
       const key = input.dataset.cycleParam;
+      if (input.type === "checkbox") {
+        params[key] = !!input.checked;
+        return;
+      }
       const raw = input.value.trim();
       if (raw === "") {
         params[key] = null;
@@ -485,6 +518,7 @@
         return;
       }
       fillCycleParamsForm(data.params);
+      if (data.state) applyState(data.state);
       pushLocalEvent("Parámetros de ciclo guardados.");
     } catch (err) {
       pushLocalEvent("Sin conexión al guardar ciclo.", "error");

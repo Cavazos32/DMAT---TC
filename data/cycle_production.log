@@ -2466,3 +2466,4 @@ LOTE 050 | PIEZA 050/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.918 s | 
 LOTE 050 | PIEZA 050/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.875 s | OK
 LOTE 050 | PIEZA 050/050 | COMPLETE | 5.128 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
 LOTE 050 | SUMMARY | 50/50 | AVG CADENCE: 6.164 s
+LOTE 001 | PIEZA 001/001 | STEP 01 | Configuración inicial | MOTION | 0.000 s | ERROR | Ciclo abortado por excepción interna: _as_bool() takes from 1 to 2 positional arguments but 3 were given

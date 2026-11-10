@@ -1354,6 +1354,18 @@ body {
   color: var(--text-muted);
 }
 
+.motion-field--check {
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.motion-field--check input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .motion-field input,
 .motion-field select {
   padding: 0.45rem 0.55rem;

@@ -242,6 +242,23 @@
                 <input type="number" min="0" step="1" data-cycle-param="ms_at_home_end">
               </label>
             </div>
+            <h3 class="cycle-params__title">Compensación de corte por lado</h3>
+            <div class="cycle-params__grid">
+              <label class="motion-field motion-field--check">
+                <span>Modo compensación dual</span>
+                <input type="checkbox" data-cycle-param="cut_comp_mode" id="cutCompMode">
+              </label>
+              <label class="motion-field">Comp. corte R (mm)
+                <input type="number" step="0.01" data-cycle-param="cut_comp_r_mm" id="cutCompRMm">
+              </label>
+              <label class="motion-field">Comp. corte L (mm)
+                <input type="number" step="0.01" data-cycle-param="cut_comp_l_mm" id="cutCompLMm">
+              </label>
+              <label class="motion-field">Corte base / R / L (mm)
+                <input type="text" id="cycleCutMm" readonly placeholder="base | R | L">
+              </label>
+            </div>
+            <p class="modal__hint" id="cutCompHint">Modo apagado: se usa la compensación general de la pantalla principal. Modo activo con comps distintas en L/R: primero el offset menor, luego el mayor; depósito/despeje sobre la última posición. Las pinzas se abren al terminar ambos cortes.</p>
             <h3 class="cycle-params__title">Depósito por montón</h3>
             <div class="cycle-params__grid">
               <label class="motion-field">Lados que alimentan
@@ -250,9 +267,6 @@
                   <option value="L">Izquierdo</option>
                   <option value="LR">Ambos</option>
                 </select>
-              </label>
-              <label class="motion-field">Corte (mm)
-                <input type="text" id="cycleCutMm" readonly placeholder="largo − 55 + compensación">
               </label>
               <label class="motion-field">Cortes por montón
                 <input type="number" min="1" step="1" data-cycle-param="deposit_batch_size">
