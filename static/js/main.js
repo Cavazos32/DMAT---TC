@@ -16,6 +16,8 @@
     metricCantidad: document.getElementById("metricCantidad"),
     metricCompensacion: document.getElementById("metricCompensacion"),
     metricTiempoCiclo: document.getElementById("metricTiempoCiclo"),
+    metricPiezasProducidas: document.getElementById("metricPiezasProducidas"),
+    metricPiezasTotal: document.getElementById("metricPiezasTotal"),
     metricTiempoEstimado: document.getElementById("metricTiempoEstimado"),
     metricTiempoCorriendo: document.getElementById("metricTiempoCorriendo"),
     eventsPanel: document.getElementById("eventsPanel"),
@@ -147,14 +149,23 @@
   }
 
   function formatSeconds(total) {
-    if (total == null || total < 0) return "—";
-    const s = Math.floor(total);
+    if (total == null || !Number.isFinite(Number(total)) || Number(total) < 0) {
+      return "—";
+    }
+    const n = Number(total);
+    const s = Math.floor(n);
     const m = Math.floor(s / 60);
     const r = s % 60;
     if (m > 0) {
       return m + " min " + String(r).padStart(2, "0") + " s";
     }
-    return r.toFixed(1) + " s";
+    return n.toFixed(1) + " s";
+  }
+
+  function formatPiezasCount(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v < 0) return "—";
+    return String(Math.floor(v));
   }
 
   function formatMm(value) {
@@ -343,9 +354,20 @@
       const cut = len - LM_PIECE_OFFSET_MM + (Number.isFinite(off) ? off : 0);
       els.cycleCutMm.value = Number.isFinite(len) && len > 0 ? cut.toFixed(2) : "";
     }
-    setCantidadInput(state.cantidad, !!state.ciclo_en_curso || !!state.charola_llena);
+    setCantidadInput(
+      state.cantidad,
+      !!state.ciclo_en_curso || !!state.charola_llena || !!state.lote_activo
+    );
     setCompInput(state.compensacion_medicion_mm);
     els.metricTiempoCiclo.textContent = formatSeconds(state.tiempo_ciclo_s);
+    if (els.metricPiezasProducidas) {
+      els.metricPiezasProducidas.textContent = formatPiezasCount(state.piezas_producidas);
+    }
+    if (els.metricPiezasTotal) {
+      const totalPiezas =
+        state.piezas_total != null ? state.piezas_total : state.cantidad;
+      els.metricPiezasTotal.textContent = formatPiezasCount(totalPiezas);
+    }
     els.metricTiempoEstimado.textContent = formatSeconds(state.tiempo_estimado_s);
     els.metricTiempoCorriendo.textContent = formatSeconds(state.tiempo_corriendo_s);
 
@@ -364,6 +386,8 @@
       estado === "running" ||
         estado === "paused" ||
         estado === "error" ||
+        !!state.ciclo_en_curso ||
+        !!state.lote_activo ||
         !!state.rutina ||
         pfCom
     );
@@ -498,6 +522,7 @@
     const estado = state.estado || "idle";
     const enCurso = !!state.ciclo_en_curso;
     const enError = estado === "error" || !!state.ciclo_error;
+    const postErrorPurga = !!state.post_error_purga;
     const running = estado === "running";
     const paused = estado === "paused";
     const rutina = !!state.rutina;
@@ -529,35 +554,51 @@
       btn.removeAttribute("aria-pressed");
     });
 
+    const loteActivo = !!state.lote_activo || (!!enCurso && (running || paused || enError));
     if (start) {
       start.disabled =
         !checklistReady ||
         purga ||
         running ||
         (paused && enCurso) ||
+        loteActivo ||
         cantidadImpar ||
-        enError;
+        enError ||
+        postErrorPurga;
       if (!checklistReady) {
         start.title = "Completa la revisión de arranque.";
       } else if (purga) {
         start.title = "Hay una purga en curso.";
+      } else if (enError) {
+        start.title = "Corrige el error y pulsa Reset.";
+      } else if (postErrorPurga) {
+        start.title = "Tras un error debes completar la purga.";
       } else if (cantidadImpar) {
         start.title =
           "Con ambos lados la cantidad tiene que ser par y de al menos 2 piezas.";
+      } else if (loteActivo) {
+        start.title = "Hay un lote en curso. Reanuda o pulsa Stop.";
       } else if (running) {
         start.title = "El ciclo ya está en marcha.";
-      } else if (enError) {
-        start.title = "Corrige el error y pulsa Reset.";
       } else {
         start.title = "";
       }
     }
     if (resume) {
-      resume.disabled = !enCurso || !paused || purga || enError;
+      resume.disabled =
+        !(enCurso || !!state.lote_activo) ||
+        !paused ||
+        purga ||
+        enError ||
+        postErrorPurga;
       resume.title = resume.disabled
-        ? paused && !enCurso
-          ? "No hay un ciclo pausado para reanudar."
-          : ""
+        ? enError
+          ? "Corrige el error y pulsa Reset."
+          : postErrorPurga
+            ? "Tras un error debes completar la purga antes de Reanudar."
+            : paused && !(enCurso || state.lote_activo)
+              ? "No hay un ciclo pausado para reanudar."
+              : ""
         : "Continúa el ciclo desde donde quedó.";
     }
     if (pause) {
@@ -565,15 +606,23 @@
       pause.title = pause.disabled ? "Solo disponible con el ciclo en marcha." : "";
     }
     if (stop) {
-      stop.disabled = !(running || paused || enCurso || rutina || enError || pfCom);
+      stop.disabled = !(
+        running ||
+        paused ||
+        enCurso ||
+        rutina ||
+        enError ||
+        postErrorPurga ||
+        pfCom
+      );
       stop.title = stop.disabled
         ? ""
-        : "Detiene el ciclo, la rutina o bloquea el PreAlimentador.";
+        : "Detiene el ciclo, la rutina o sale de la ruta post-error (cancela el lote).";
     }
     if (reset) {
       reset.disabled = !enError;
       reset.title = enError
-        ? "Cuando PLC, Motion y PreAlimentador estén bien: estabiliza y limpia el error."
+        ? "Cuando PLC, Motion y PreAlimentador estén bien: limpia el error y luego haz la purga."
         : "Solo aplica cuando hay un error activo.";
     }
 
@@ -587,7 +636,9 @@
 
     if (els.statusBannerDetail && !enError && (estado === "idle" || estado === "paused")) {
       let hint = "";
-      if (start && start.disabled) {
+      if (postErrorPurga) {
+        hint = state.mensaje || "Completa la purga para continuar.";
+      } else if (start && start.disabled) {
         if (!checklistReady) {
           hint = "Completa la revisión de arranque para poder iniciar el ciclo.";
         } else if (cantidadImpar) {
@@ -1203,6 +1254,7 @@
     const estado = state.estado || "idle";
     const enCurso = !!state.ciclo_en_curso;
     const enError = estado === "error" || !!state.ciclo_error;
+    const postErrorPurga = !!state.post_error_purga;
     const running = estado === "running";
     const paused = estado === "paused";
     const rutina = !!state.rutina;
@@ -1211,26 +1263,39 @@
 
     if (els.cycleStepStart) {
       els.cycleStepStart.disabled =
-        !checklistReady || rutina || running || (paused && enCurso) || enError;
+        !checklistReady ||
+        rutina ||
+        running ||
+        (paused && enCurso) ||
+        enError ||
+        postErrorPurga;
       els.cycleStepStart.title = !checklistReady
         ? "Completa la revisión de arranque."
         : running || (paused && enCurso)
           ? "Hay un ciclo en curso."
           : enError
             ? "Corrige el error y pulsa Reset."
-            : "Inicia una pieza y pausa al terminar cada paso.";
+            : postErrorPurga
+              ? "Tras un error debes completar la purga."
+              : "Inicia una pieza y pausa al terminar cada paso.";
     }
     if (els.cycleStepNext) {
-      const canNext = stepMode && paused && enCurso && !enError && !rutina;
+      const canNext =
+        stepMode && paused && enCurso && !enError && !rutina && !postErrorPurga;
       els.cycleStepNext.disabled = !canNext;
       els.cycleStepNext.title = canNext
         ? "Ejecuta el siguiente paso y vuelve a pausar."
         : stepMode && running
           ? "Espera a que termine el paso en curso."
-          : "Solo en pausa durante la prueba paso a paso.";
+          : postErrorPurga
+            ? "Tras un error debes completar la purga."
+            : "Solo en pausa durante la prueba paso a paso.";
     }
     if (els.cycleStepStop) {
-      els.cycleStepStop.disabled = !(stepMode && (running || paused || enCurso || enError));
+      els.cycleStepStop.disabled = !(
+        stepMode &&
+        (running || paused || enCurso || enError || postErrorPurga)
+      );
       els.cycleStepStop.title = els.cycleStepStop.disabled
         ? ""
         : "Detiene la prueba paso a paso.";
@@ -1239,12 +1304,15 @@
       if (stepMode && running) {
         els.cycleStepTestHint.textContent =
           state.mensaje || "Ejecutando paso…";
-      } else if (stepMode && paused && enCurso) {
+      } else if (stepMode && paused && enCurso && !postErrorPurga) {
         els.cycleStepTestHint.textContent =
           state.mensaje || "Paso listo. Pulsa «Siguiente paso».";
       } else if (stepMode && enError) {
         els.cycleStepTestHint.textContent =
           state.ciclo_error || state.mensaje || "Error en la prueba.";
+      } else if (stepMode && postErrorPurga) {
+        els.cycleStepTestHint.textContent =
+          state.mensaje || "Completa la purga para continuar la prueba.";
       } else {
         els.cycleStepTestHint.textContent =
           "Ejecuta una pieza y se detiene al completar cada paso. Usa «Siguiente paso» para continuar.";
@@ -1252,7 +1320,22 @@
     }
   }
 
+  let processActionInFlight = false;
+
   async function sendAction(block, action, extra) {
+    // Evita Start/Resume/Stop duplicados por doble clic (creaba workers gemelos).
+    const isProcessGate =
+      block === "proceso" &&
+      (action === "start" ||
+        action === "resume" ||
+        action === "stop" ||
+        action === "reset" ||
+        action === "step_start" ||
+        action === "step_next");
+    if (isProcessGate) {
+      if (processActionInFlight) return;
+      processActionInFlight = true;
+    }
     try {
       const res = await fetch("/api/action", {
         method: "POST",
@@ -1277,6 +1360,8 @@
       if (data.motion_data) motionApplyDataFields(data.motion_data);
     } catch (err) {
       pushLocalEvent("Sin conexión con el servidor.", "error");
+    } finally {
+      if (isProcessGate) processActionInFlight = false;
     }
   }
 
@@ -2080,11 +2165,23 @@
     const rutina = state.rutina || "";
     const fase = state.rutina_fase || "";
     const purga = rutina === "purga";
+    const enError = state.estado === "error" || !!state.ciclo_error;
+    const postErrorPurga = !!state.post_error_purga;
     const cicloCorriendo = state.estado === "running";
     const purgaBtn = actionButton("purga");
     if (purgaBtn) {
-      purgaBtn.disabled = cicloCorriendo || (!!rutina && !purga);
-      setButtonOn(purgaBtn, purga);
+      purgaBtn.disabled =
+        cicloCorriendo || enError || (!!rutina && !purga);
+      setButtonOn(purgaBtn, purga || (postErrorPurga && !enError && !purga));
+      purgaBtn.title = enError
+        ? "Limpia el error con Reset antes de la purga."
+        : postErrorPurga && !purga
+          ? "Obligatoria tras el error. Completa la purga para continuar."
+          : "";
+      if (postErrorPurga && !enError && !purga && !purgaBtn.disabled) {
+        purgaBtn.classList.add("is-active");
+        purgaBtn.setAttribute("aria-pressed", "true");
+      }
     }
     const home = actionButton("posicion_inicial");
     if (home) {

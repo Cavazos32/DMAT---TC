@@ -74,7 +74,7 @@
       <section class="center-hub" aria-label="Monitor de producción">
         <div class="progress-block">
           <div class="progress-block__header">
-            <span class="progress-block__title">Progreso de ciclo</span>
+            <span class="progress-block__title">Progreso de lote</span>
             <span class="progress-block__pct" id="progressPct">0 %</span>
           </div>
           <div class="progress-track" aria-hidden="true">
@@ -107,6 +107,14 @@
           <article class="metric-card">
             <span class="metric-label">Tiempo de ciclo</span>
             <span class="metric-value" id="metricTiempoCiclo">—</span>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">Piezas producidas / total</span>
+            <div class="metric-dual">
+              <span class="metric-value" id="metricPiezasProducidas">—</span>
+              <span class="metric-sep">/</span>
+              <span class="metric-value metric-value--accent" id="metricPiezasTotal">—</span>
+            </div>
           </article>
           <article class="metric-card metric-card--wide">
             <span class="metric-label">Tiempo estimado / tiempo corriendo</span>

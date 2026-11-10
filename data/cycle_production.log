@@ -1224,3 +1224,1245 @@ LOTE 005 | PIEZA 002/005 | STEP 03 | Alimentación L/R | MOTION | 2.292 s | PARA
 LOTE 005 | PIEZA 001/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.011 s | OK
 LOTE 005 | PIEZA 001/005 | COMPLETE | 8.673 s | FIRST | ENC R=55.50 mm L=55.50 mm
 LOTE 005 | PIEZA 002/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.524 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 01 | Configuración inicial | MOTION | 0.020 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 02 | Holder + encoder | PLC | 0.299 s | OK
+LOTE 004 | PIEZA 001/001 | STEP 03 | Alimentación L/R | MOTION | 61.228 s | ERROR | Stop — ciclo detenido. Listo para Iniciar.
+LOTE 002 | PIEZA 001/002 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 02 | Holder + encoder | PLC | 0.281 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 03 | Alimentación L/R | MOTION | 2.307 s | OK | ENC R=55.00 mm L=55.50 mm
+LOTE 002 | PIEZA 001/002 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 05 | LM Guide — corte | MOTION | 1.339 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 06 | Corte R/L | PLC | 0.365 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 002 | PIEZA 001/002 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.993 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 002 | PIEZA 002/002 | STEP 03 | Alimentación L/R | MOTION | 2.428 s | PARALLEL | ENC R=57.00 mm L=55.00 mm
+LOTE 002 | PIEZA 001/002 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.140 s | OK
+LOTE 002 | PIEZA 001/002 | COMPLETE | 9.268 s | FIRST | ENC R=55.00 mm L=55.50 mm
+LOTE 002 | PIEZA 002/002 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.917 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.877 s | OK
+LOTE 002 | PIEZA 002/002 | COMPLETE | 5.063 s | HANDOFF | ENC R=57.00 mm L=55.00 mm
+LOTE 002 | SUMMARY | 2/2 | AVG CADENCE: 5.063 s
+LOTE 002 | PIEZA 001/002 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 02 | Holder + encoder | PLC | 0.281 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 03 | Alimentación L/R | MOTION | 2.311 s | OK | ENC R=56.00 mm L=56.00 mm
+LOTE 002 | PIEZA 001/002 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 002 | PIEZA 001/002 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 002 | PIEZA 001/002 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.988 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 002 | PIEZA 002/002 | STEP 03 | Alimentación L/R | MOTION | 2.275 s | PARALLEL | ENC R=55.00 mm L=54.50 mm
+LOTE 002 | PIEZA 001/002 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.002 s | OK
+LOTE 002 | PIEZA 001/002 | COMPLETE | 9.073 s | FIRST | ENC R=56.00 mm L=56.00 mm
+LOTE 002 | PIEZA 002/002 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 05 | LM Guide — corte | MOTION | 1.339 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.923 s | OK
+LOTE 002 | PIEZA 002/002 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.882 s | OK
+LOTE 002 | PIEZA 002/002 | COMPLETE | 5.088 s | HANDOFF | ENC R=55.00 mm L=54.50 mm
+LOTE 002 | SUMMARY | 2/2 | AVG CADENCE: 5.088 s
+LOTE 025 | PIEZA 001/025 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 02 | Holder + encoder | PLC | 0.302 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 03 | Alimentación L/R | MOTION | 2.272 s | OK | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.514 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 05 | LM Guide — corte | MOTION | 1.345 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 01 | Configuración inicial | MOTION | 0.052 s | PARALLEL
+LOTE 025 | PIEZA 001/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.984 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 025 | PIEZA 002/025 | STEP 03 | Alimentación L/R | MOTION | 2.279 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.992 s | OK
+LOTE 025 | PIEZA 001/025 | COMPLETE | 9.102 s | FIRST | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 002/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.500 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 025 | PIEZA 002/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 02 | Holder + encoder | PLC | 0.638 s | PARALLEL
+LOTE 025 | PIEZA 003/025 | STEP 03 | Alimentación L/R | MOTION | 2.291 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 002/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.015 s | OK
+LOTE 025 | PIEZA 002/025 | COMPLETE | 6.266 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 003/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 025 | PIEZA 003/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.993 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 025 | PIEZA 004/025 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=55.00 mm L=56.00 mm
+LOTE 025 | PIEZA 003/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.004 s | OK
+LOTE 025 | PIEZA 003/025 | COMPLETE | 6.263 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 004/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 06 | Corte R/L | PLC | 0.358 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 025 | PIEZA 004/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.962 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 02 | Holder + encoder | PLC | 0.609 s | PARALLEL
+LOTE 025 | PIEZA 005/025 | STEP 03 | Alimentación L/R | MOTION | 2.283 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 025 | PIEZA 004/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.974 s | OK
+LOTE 025 | PIEZA 004/025 | COMPLETE | 6.218 s | HANDOFF | ENC R=55.00 mm L=56.00 mm
+LOTE 025 | PIEZA 005/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.503 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 025 | PIEZA 005/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.002 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 02 | Holder + encoder | PLC | 0.616 s | PARALLEL
+LOTE 025 | PIEZA 006/025 | STEP 03 | Alimentación L/R | MOTION | 2.278 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 025 | PIEZA 005/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.974 s | OK
+LOTE 025 | PIEZA 005/025 | COMPLETE | 6.255 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 025 | PIEZA 006/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 05 | LM Guide — corte | MOTION | 1.328 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 025 | PIEZA 006/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.989 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.912 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 007/025 | STEP 02 | Holder + encoder | PLC | 4.573 s | PARALLEL
+LOTE 025 | PIEZA 006/025 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 02 | Holder + encoder | PLC | 0.306 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 03 | Alimentación L/R | MOTION | 2.718 s | OK | ENC R=67.50 mm L=55.50 mm
+LOTE 025 | PIEZA 006/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 06 | Corte R/L | PLC | 0.365 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.918 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 03 | Alimentación L/R | MOTION | 4.055 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 050 | PIEZA 001/001 | STEP 08 | Regreso Home + blower | PLC+MOTION | 5.137 s | ERROR | Stop — ciclo detenido. Listo para Iniciar.
+LOTE 025 | PIEZA 001/025 | STEP 01 | Configuración inicial | MOTION | 0.668 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 01 | Configuración inicial | MOTION | 0.073 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 02 | Holder + encoder | PLC | 0.306 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 02 | Holder + encoder | PLC | 2.858 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 03 | Alimentación L/R | MOTION | 2.704 s | OK | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 03 | Alimentación L/R | MOTION | 0.241 s | OK | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.507 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.560 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 05 | LM Guide — corte | MOTION | 1.379 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 05 | LM Guide — corte | MOTION | 1.512 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 06 | Corte R/L | PLC | 0.425 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 01 | Configuración inicial | MOTION | 0.251 s | PARALLEL
+LOTE 025 | PIEZA 001/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.175 s | OK
+LOTE 025 | PIEZA 001/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.833 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 02 | Holder + encoder | PLC | 1.041 s | PARALLEL
+LOTE 025 | PIEZA 002/025 | STEP 03 | Alimentación L/R | MOTION | 2.271 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 5.579 s | OK
+LOTE 025 | PIEZA 001/025 | COMPLETE | 13.006 s | FIRST | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 001/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 5.903 s | OK
+LOTE 025 | PIEZA 002/025 | COMPLETE | 13.284 s | FIRST | ENC R=55.50 mm L=55.00 mm
+LOTE 025 | PIEZA 002/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 01 | Configuración inicial | MOTION | 1.199 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 05 | LM Guide — corte | MOTION | 1.403 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 02 | Holder + encoder | PLC | 0.281 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 03 | Alimentación L/R | MOTION | 0.222 s | OK | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 002/025 | STEP 06 | Corte R/L | PLC | 0.597 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.513 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 01 | Configuración inicial | MOTION | 0.547 s | PARALLEL
+LOTE 025 | PIEZA 003/025 | STEP 05 | LM Guide — corte | MOTION | 1.099 s | OK
+LOTE 025 | PIEZA 002/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.488 s | OK
+LOTE 025 | PIEZA 003/025 | STEP 06 | Corte R/L | PLC | 0.510 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 02 | Holder + encoder | PLC | 1.277 s | PARALLEL
+LOTE 025 | PIEZA 003/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.942 s | OK
+LOTE 025 | PIEZA 004/025 | STEP 03 | Alimentación L/R | MOTION | 1.728 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 004/025 | STEP 03 | Alimentación L/R | MOTION | 2.318 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 025 | PIEZA 002/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 6.363 s | OK
+LOTE 025 | PIEZA 003/025 | COMPLETE | 10.458 s | HANDOFF | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 003/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 4.996 s | OK
+LOTE 025 | PIEZA 004/025 | COMPLETE | 10.100 s | FIRST | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 005/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.011 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.292 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.504 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 05 | LM Guide — corte | MOTION | 0.083 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 02 | Holder + encoder | PLC | 1.377 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 05 | LM Guide — corte | MOTION | 1.350 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 06 | Corte R/L | PLC | 0.023 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 03 | Alimentación L/R | MOTION | 0.246 s | OK | ENC R=0.50 mm L=0.00 mm
+LOTE 025 | PIEZA 005/025 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.028 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.558 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 05 | LM Guide — corte | MOTION | 0.187 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 006/025 | STEP 01 | Configuración inicial | MOTION | 0.565 s | PARALLEL
+LOTE 025 | PIEZA 005/025 | STEP 05 | LM Guide — corte | MOTION | 1.063 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.485 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 0.115 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 005/025 | STEP 06 | Corte R/L | PLC | 0.556 s | OK
+LOTE 025 | PIEZA 005/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.072 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 006/025 | STEP 02 | Holder + encoder | PLC | 0.776 s | PARALLEL
+LOTE 025 | PIEZA 005/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.898 s | OK
+LOTE 025 | PIEZA 006/025 | STEP 03 | Alimentación L/R | MOTION | 0.768 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 006/025 | STEP 03 | Alimentación L/R | MOTION | 2.451 s | PARALLEL | ENC R=59.00 mm L=59.50 mm
+LOTE 025 | PIEZA 005/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 6.511 s | OK
+LOTE 025 | PIEZA 005/025 | COMPLETE | 10.271 s | HANDOFF | ENC R=0.50 mm L=0.00 mm
+LOTE 025 | PIEZA 005/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 5.140 s | OK
+LOTE 025 | PIEZA 006/025 | COMPLETE | 10.192 s | FIRST | ENC R=0.50 mm L=0.00 mm
+LOTE 025 | PIEZA 007/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.123 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 007/025 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 02 | Holder + encoder | PLC | 0.366 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 03 | Alimentación L/R | MOTION | 0.023 s | ERROR | E014 PLC: Holder no confirmado liberado.
+LOTE 025 | PIEZA 007/025 | STEP 03 | Alimentación L/R | MOTION | 0.222 s | OK | ENC R=0.00 mm L=0.00 mm
+LOTE 025 | PIEZA 007/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.051 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 007/025 | STEP 04 | Pinzas — liberar holder | PLC | 0.301 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 05 | LM Guide — corte | MOTION | 0.495 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 007/025 | STEP 05 | LM Guide — corte | MOTION | 1.327 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 06 | Corte R/L | PLC | 0.054 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 007/025 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.211 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 008/025 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 025 | PIEZA 007/025 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 025 | PIEZA 007/025 | STEP 08 | Regreso Home + blower | PLC+MOTION | 0.148 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 025 | PIEZA 008/025 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 003 | PIEZA 001/003 | STEP 01 | Configuración inicial | MOTION | 0.020 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 02 | Holder + encoder | PLC | 0.302 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 03 | Alimentación L/R | MOTION | 2.264 s | OK | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 001/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 06 | Corte R/L | PLC | 0.359 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 003 | PIEZA 001/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.962 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 02 | Holder + encoder | PLC | 0.605 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 03 | Alimentación L/R | MOTION | 2.277 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 001/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.988 s | OK
+LOTE 003 | PIEZA 001/003 | COMPLETE | 9.032 s | FIRST | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 002/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.512 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 05 | LM Guide — corte | MOTION | 0.573 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 003 | PIEZA 002/003 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 02 | Holder + encoder | PLC | 0.306 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 03 | Alimentación L/R | MOTION | 2.262 s | OK | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 002/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 06 | Corte R/L | PLC | 0.360 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.985 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 003 | PIEZA 003/003 | STEP 03 | Alimentación L/R | MOTION | 0.816 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 006 | PIEZA 001/001 | STEP 08 | Regreso Home + blower | PLC+MOTION | 10.494 s | ERROR | Stop — ciclo detenido. Listo para Iniciar.
+LOTE 003 | PIEZA 001/003 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 02 | Holder + encoder | PLC | 0.321 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 03 | Alimentación L/R | MOTION | 1.794 s | OK | ENC R=41.50 mm L=38.50 mm
+LOTE 003 | PIEZA 001/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.503 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 05 | LM Guide — corte | MOTION | 1.321 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 003 | PIEZA 001/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 02 | Holder + encoder | PLC | 0.630 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 03 | Alimentación L/R | MOTION | 2.271 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 003 | PIEZA 001/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.985 s | OK
+LOTE 003 | PIEZA 001/003 | COMPLETE | 9.929 s | FIRST | ENC R=41.50 mm L=38.50 mm
+LOTE 003 | PIEZA 002/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.990 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 003 | PIEZA 003/003 | STEP 03 | Alimentación L/R | MOTION | 2.284 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 003 | PIEZA 002/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.975 s | OK
+LOTE 003 | PIEZA 002/003 | COMPLETE | 6.276 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 003 | PIEZA 003/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.914 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.877 s | OK
+LOTE 003 | PIEZA 003/003 | COMPLETE | 5.053 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 003 | SUMMARY | 3/3 | AVG CADENCE: 5.665 s
+LOTE 010 | PIEZA 001/010 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 02 | Holder + encoder | PLC | 0.278 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 03 | Alimentación L/R | MOTION | 2.332 s | OK | ENC R=56.50 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 001/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.971 s | OK
+LOTE 020 | PIEZA 001/001 | STEP 08 | Regreso Home + blower | PLC+MOTION | 16.167 s | ERROR | Stop — ciclo detenido. Listo para Iniciar.
+LOTE 010 | PIEZA 001/010 | STEP 01 | Configuración inicial | MOTION | 0.020 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 02 | Holder + encoder | PLC | 0.280 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 03 | Alimentación L/R | MOTION | 2.376 s | OK | ENC R=57.00 mm L=54.50 mm
+LOTE 010 | PIEZA 001/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.506 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 001/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 03 | Alimentación L/R | MOTION | 2.286 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.011 s | OK
+LOTE 010 | PIEZA 001/010 | COMPLETE | 9.156 s | FIRST | ENC R=57.00 mm L=54.50 mm
+LOTE 010 | PIEZA 002/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.464 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.991 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 02 | Holder + encoder | PLC | 0.613 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 03 | Alimentación L/R | MOTION | 2.302 s | PARALLEL | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 002/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.996 s | OK
+LOTE 010 | PIEZA 002/010 | COMPLETE | 6.235 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 01 | Configuración inicial | MOTION | 0.052 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 02 | Holder + encoder | PLC | 0.611 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 03 | Alimentación L/R | MOTION | 2.245 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 010 | PIEZA 003/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.993 s | OK
+LOTE 010 | PIEZA 003/010 | COMPLETE | 6.228 s | HANDOFF | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 004/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 05 | LM Guide — corte | MOTION | 1.333 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 01 | Configuración inicial | MOTION | 0.052 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.979 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 02 | Holder + encoder | PLC | 0.613 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 03 | Alimentación L/R | MOTION | 2.264 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 004/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.965 s | OK
+LOTE 010 | PIEZA 004/010 | COMPLETE | 6.227 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 010 | PIEZA 005/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.522 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 05 | LM Guide — corte | MOTION | 1.320 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 01 | Configuración inicial | MOTION | 0.085 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.004 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 03 | Alimentación L/R | MOTION | 2.270 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 005/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.961 s | OK
+LOTE 010 | PIEZA 005/010 | COMPLETE | 6.264 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 006/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.506 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 05 | LM Guide — corte | MOTION | 1.321 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 03 | Alimentación L/R | MOTION | 2.295 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 006/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.988 s | OK
+LOTE 010 | PIEZA 006/010 | COMPLETE | 6.243 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.522 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.992 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 02 | Holder + encoder | PLC | 0.621 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 03 | Alimentación L/R | MOTION | 2.299 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.002 s | OK
+LOTE 010 | PIEZA 007/010 | COMPLETE | 6.291 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 008/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.507 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 05 | LM Guide — corte | MOTION | 1.343 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.013 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 02 | Holder + encoder | PLC | 0.615 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 010 | PIEZA 008/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.980 s | OK
+LOTE 010 | PIEZA 008/010 | COMPLETE | 6.302 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.376 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 003 | PIEZA 001/003 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 02 | Holder + encoder | PLC | 0.278 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 03 | Alimentación L/R | MOTION | 2.399 s | OK | ENC R=58.50 mm L=63.00 mm
+LOTE 003 | PIEZA 001/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.501 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 05 | LM Guide — corte | MOTION | 1.348 s | OK
+LOTE 003 | PIEZA 001/003 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 003 | PIEZA 001/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.976 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 03 | Alimentación L/R | MOTION | 2.261 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 001/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.984 s | OK
+LOTE 003 | PIEZA 001/003 | COMPLETE | 9.179 s | FIRST | ENC R=58.50 mm L=63.00 mm
+LOTE 003 | PIEZA 002/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 003 | PIEZA 002/003 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 01 | Configuración inicial | MOTION | 0.082 s | PARALLEL
+LOTE 003 | PIEZA 002/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.000 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 003 | PIEZA 003/003 | STEP 03 | Alimentación L/R | MOTION | 2.286 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 002/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.972 s | OK
+LOTE 003 | PIEZA 002/003 | COMPLETE | 6.231 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | PIEZA 003/003 | STEP 04 | Pinzas — liberar holder | PLC | 0.514 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.916 s | OK
+LOTE 003 | PIEZA 003/003 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.876 s | OK
+LOTE 003 | PIEZA 003/003 | COMPLETE | 5.082 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 003 | SUMMARY | 3/3 | AVG CADENCE: 5.656 s
+LOTE 005 | PIEZA 001/005 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 005 | PIEZA 001/005 | STEP 02 | Holder + encoder | PLC | 0.299 s | OK
+LOTE 005 | PIEZA 001/005 | STEP 03 | Alimentación L/R | MOTION | 2.322 s | OK | ENC R=55.00 mm L=55.00 mm
+LOTE 005 | PIEZA 001/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 005 | PIEZA 001/005 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 005 | PIEZA 001/005 | STEP 06 | Corte R/L | PLC | 0.347 s | OK
+LOTE 005 | PIEZA 002/005 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 005 | PIEZA 001/005 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.993 s | OK
+LOTE 005 | PIEZA 002/005 | STEP 02 | Holder + encoder | PLC | 0.632 s | PARALLEL
+LOTE 005 | PIEZA 002/005 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 005 | PIEZA 001/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.989 s | OK
+LOTE 005 | PIEZA 001/005 | COMPLETE | 9.109 s | FIRST | ENC R=55.00 mm L=55.00 mm
+LOTE 005 | PIEZA 002/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 005 | PIEZA 002/005 | STEP 05 | LM Guide — corte | MOTION | 1.314 s | OK
+LOTE 005 | PIEZA 002/005 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 005 | PIEZA 003/005 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 005 | PIEZA 002/005 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.987 s | OK
+LOTE 005 | PIEZA 003/005 | STEP 02 | Holder + encoder | PLC | 0.616 s | PARALLEL
+LOTE 005 | PIEZA 003/005 | STEP 03 | Alimentación L/R | MOTION | 2.272 s | PARALLEL | ENC R=55.50 mm L=55.50 mm
+LOTE 005 | PIEZA 002/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.971 s | OK
+LOTE 005 | PIEZA 002/005 | COMPLETE | 6.218 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 005 | PIEZA 003/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 005 | PIEZA 003/005 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 005 | PIEZA 003/005 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 005 | PIEZA 004/005 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 005 | PIEZA 003/005 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.001 s | OK
+LOTE 005 | PIEZA 004/005 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 005 | PIEZA 004/005 | STEP 03 | Alimentación L/R | MOTION | 2.311 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 005 | PIEZA 003/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.032 s | OK
+LOTE 005 | PIEZA 003/005 | COMPLETE | 6.302 s | HANDOFF | ENC R=55.50 mm L=55.50 mm
+LOTE 005 | PIEZA 004/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 005 | PIEZA 004/005 | STEP 05 | LM Guide — corte | MOTION | 1.325 s | OK
+LOTE 005 | PIEZA 004/005 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 005 | PIEZA 004/005 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 02 | Holder + encoder | PLC | 0.619 s | PARALLEL
+LOTE 005 | PIEZA 005/005 | STEP 03 | Alimentación L/R | MOTION | 2.312 s | PARALLEL | ENC R=55.50 mm L=54.50 mm
+LOTE 005 | PIEZA 004/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.013 s | OK
+LOTE 005 | PIEZA 004/005 | COMPLETE | 6.250 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 005 | PIEZA 005/005 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.917 s | OK
+LOTE 005 | PIEZA 005/005 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.881 s | OK
+LOTE 005 | PIEZA 005/005 | COMPLETE | 5.102 s | HANDOFF | ENC R=55.50 mm L=54.50 mm
+LOTE 005 | SUMMARY | 5/5 | AVG CADENCE: 5.968 s
+LOTE 015 | PIEZA 001/015 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 02 | Holder + encoder | PLC | 0.295 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 03 | Alimentación L/R | MOTION | 2.263 s | OK | ENC R=55.00 mm L=55.50 mm
+LOTE 015 | PIEZA 001/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.513 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 01 | Configuración inicial | MOTION | 0.082 s | PARALLEL
+LOTE 015 | PIEZA 001/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.000 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 02 | Holder + encoder | PLC | 0.609 s | PARALLEL
+LOTE 015 | PIEZA 002/015 | STEP 03 | Alimentación L/R | MOTION | 2.276 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 001/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.967 s | OK
+LOTE 015 | PIEZA 001/015 | COMPLETE | 9.051 s | FIRST | ENC R=55.00 mm L=55.50 mm
+LOTE 015 | PIEZA 002/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 05 | LM Guide — corte | MOTION | 1.313 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 015 | PIEZA 002/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 02 | Holder + encoder | PLC | 0.627 s | PARALLEL
+LOTE 015 | PIEZA 003/015 | STEP 03 | Alimentación L/R | MOTION | 2.298 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 015 | PIEZA 002/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.008 s | OK
+LOTE 015 | PIEZA 002/015 | COMPLETE | 6.284 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 003/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 05 | LM Guide — corte | MOTION | 1.346 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 015 | PIEZA 003/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.999 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 02 | Holder + encoder | PLC | 0.644 s | PARALLEL
+LOTE 015 | PIEZA 004/015 | STEP 03 | Alimentación L/R | MOTION | 2.318 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 015 | PIEZA 003/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.044 s | OK
+LOTE 015 | PIEZA 003/015 | COMPLETE | 6.351 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 015 | PIEZA 004/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 05 | LM Guide — corte | MOTION | 1.320 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 01 | Configuración inicial | MOTION | 0.083 s | PARALLEL
+LOTE 015 | PIEZA 004/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.003 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 015 | PIEZA 005/015 | STEP 03 | Alimentación L/R | MOTION | 2.281 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 004/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.972 s | OK
+LOTE 015 | PIEZA 004/015 | COMPLETE | 6.240 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 015 | PIEZA 005/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.509 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 015 | PIEZA 005/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.967 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 02 | Holder + encoder | PLC | 0.612 s | PARALLEL
+LOTE 015 | PIEZA 006/015 | STEP 03 | Alimentación L/R | MOTION | 2.252 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 015 | PIEZA 005/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.945 s | OK
+LOTE 015 | PIEZA 005/015 | COMPLETE | 6.201 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 006/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.390 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 015 | PIEZA 001/015 | STEP 01 | Configuración inicial | MOTION | 0.020 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 02 | Holder + encoder | PLC | 0.279 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 03 | Alimentación L/R | MOTION | 2.259 s | OK | ENC R=54.50 mm L=58.00 mm
+LOTE 015 | PIEZA 001/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.520 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 015 | PIEZA 001/015 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 015 | PIEZA 001/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.981 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 02 | Holder + encoder | PLC | 0.636 s | PARALLEL
+LOTE 015 | PIEZA 002/015 | STEP 03 | Alimentación L/R | MOTION | 2.267 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 001/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.988 s | OK
+LOTE 015 | PIEZA 001/015 | COMPLETE | 9.043 s | FIRST | ENC R=54.50 mm L=58.00 mm
+LOTE 015 | PIEZA 002/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 05 | LM Guide — corte | MOTION | 1.325 s | OK
+LOTE 015 | PIEZA 002/015 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 015 | PIEZA 002/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.985 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 015 | PIEZA 003/015 | STEP 03 | Alimentación L/R | MOTION | 2.202 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 002/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.946 s | OK
+LOTE 015 | PIEZA 002/015 | COMPLETE | 6.204 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 003/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.508 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 015 | PIEZA 003/015 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 015 | PIEZA 003/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.992 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 02 | Holder + encoder | PLC | 0.620 s | PARALLEL
+LOTE 015 | PIEZA 004/015 | STEP 03 | Alimentación L/R | MOTION | 2.324 s | PARALLEL | ENC R=56.00 mm L=55.50 mm
+LOTE 015 | PIEZA 003/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.027 s | OK
+LOTE 015 | PIEZA 003/015 | COMPLETE | 6.307 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 004/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 015 | PIEZA 004/015 | STEP 06 | Corte R/L | PLC | 0.363 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 015 | PIEZA 004/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.967 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 02 | Holder + encoder | PLC | 0.619 s | PARALLEL
+LOTE 015 | PIEZA 005/015 | STEP 03 | Alimentación L/R | MOTION | 2.258 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 004/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.008 s | OK
+LOTE 015 | PIEZA 004/015 | COMPLETE | 6.261 s | HANDOFF | ENC R=56.00 mm L=55.50 mm
+LOTE 015 | PIEZA 005/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 015 | PIEZA 005/015 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 015 | PIEZA 005/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 015 | PIEZA 006/015 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 015 | PIEZA 005/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.010 s | OK
+LOTE 015 | PIEZA 005/015 | COMPLETE | 6.231 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 015 | PIEZA 006/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.481 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 05 | LM Guide — corte | MOTION | 1.344 s | OK
+LOTE 015 | PIEZA 006/015 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 015 | PIEZA 007/015 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 015 | PIEZA 006/015 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.991 s | OK
+LOTE 015 | PIEZA 007/015 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 015 | PIEZA 007/015 | STEP 03 | Alimentación L/R | MOTION | 2.275 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 015 | PIEZA 006/015 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.996 s | OK
+LOTE 015 | PIEZA 006/015 | COMPLETE | 6.274 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 015 | PIEZA 007/015 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 015 | PIEZA 007/015 | STEP 05 | LM Guide — corte | MOTION | 0.138 s | ERROR | E098 PreAlimentador: Falla de holgura en el lado R.
+LOTE 010 | PIEZA 001/010 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 02 | Holder + encoder | PLC | 0.277 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 03 | Alimentación L/R | MOTION | 2.263 s | OK | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 001/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.990 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 02 | Holder + encoder | PLC | 0.616 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 03 | Alimentación L/R | MOTION | 2.283 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.983 s | OK
+LOTE 010 | PIEZA 001/010 | COMPLETE | 9.008 s | FIRST | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 002/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.965 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 02 | Holder + encoder | PLC | 0.635 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 002/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.998 s | OK
+LOTE 010 | PIEZA 002/010 | COMPLETE | 6.230 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.503 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 05 | LM Guide — corte | MOTION | 1.314 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 06 | Corte R/L | PLC | 0.358 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.975 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 02 | Holder + encoder | PLC | 0.606 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 03 | Alimentación L/R | MOTION | 2.284 s | PARALLEL | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 003/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.966 s | OK
+LOTE 010 | PIEZA 003/010 | COMPLETE | 6.281 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 004/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 05 | LM Guide — corte | MOTION | 1.342 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 06 | Corte R/L | PLC | 0.360 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.976 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 03 | Alimentación L/R | MOTION | 2.330 s | PARALLEL | ENC R=55.50 mm L=56.50 mm
+LOTE 010 | PIEZA 004/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.056 s | OK
+LOTE 010 | PIEZA 004/010 | COMPLETE | 6.356 s | HANDOFF | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 005/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 02 | Holder + encoder | PLC | 0.635 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 03 | Alimentación L/R | MOTION | 2.318 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 005/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.036 s | OK
+LOTE 010 | PIEZA 005/010 | COMPLETE | 6.263 s | HANDOFF | ENC R=55.50 mm L=56.50 mm
+LOTE 010 | PIEZA 006/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.503 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.971 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 02 | Holder + encoder | PLC | 0.633 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 03 | Alimentación L/R | MOTION | 2.274 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 006/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.990 s | OK
+LOTE 010 | PIEZA 006/010 | COMPLETE | 6.240 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.965 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 02 | Holder + encoder | PLC | 0.638 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=55.50 mm L=57.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.002 s | OK
+LOTE 010 | PIEZA 007/010 | COMPLETE | 6.228 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 008/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 05 | LM Guide — corte | MOTION | 1.320 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 01 | Configuración inicial | MOTION | 0.083 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.010 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 02 | Holder + encoder | PLC | 0.620 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 03 | Alimentación L/R | MOTION | 2.255 s | PARALLEL | ENC R=55.00 mm L=54.50 mm
+LOTE 010 | PIEZA 008/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.009 s | OK
+LOTE 010 | PIEZA 008/010 | COMPLETE | 6.301 s | HANDOFF | ENC R=55.50 mm L=57.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 05 | LM Guide — corte | MOTION | 1.325 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.970 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 010 | PIEZA 010/010 | STEP 03 | Alimentación L/R | MOTION | 2.281 s | PARALLEL | ENC R=54.50 mm L=55.50 mm
+LOTE 010 | PIEZA 009/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.000 s | OK
+LOTE 010 | PIEZA 009/010 | COMPLETE | 6.244 s | HANDOFF | ENC R=55.00 mm L=54.50 mm
+LOTE 010 | PIEZA 010/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.507 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 06 | Corte R/L | PLC | 0.343 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.917 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.880 s | OK
+LOTE 010 | PIEZA 010/010 | COMPLETE | 5.088 s | HANDOFF | ENC R=54.50 mm L=55.50 mm
+LOTE 010 | SUMMARY | 10/10 | AVG CADENCE: 6.137 s
+LOTE 010 | PIEZA 001/010 | STEP 01 | Configuración inicial | MOTION | 0.020 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 02 | Holder + encoder | PLC | 0.304 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 03 | Alimentación L/R | MOTION | 2.265 s | OK | ENC R=55.00 mm L=55.50 mm
+LOTE 010 | PIEZA 001/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 05 | LM Guide — corte | MOTION | 1.320 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 001/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.965 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 02 | Holder + encoder | PLC | 0.611 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 03 | Alimentación L/R | MOTION | 2.291 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.983 s | OK
+LOTE 010 | PIEZA 001/010 | COMPLETE | 9.020 s | FIRST | ENC R=55.00 mm L=55.50 mm
+LOTE 010 | PIEZA 002/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.526 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 05 | LM Guide — corte | MOTION | 1.348 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.984 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 02 | Holder + encoder | PLC | 0.622 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 03 | Alimentación L/R | MOTION | 2.321 s | PARALLEL | ENC R=56.00 mm L=55.00 mm
+LOTE 010 | PIEZA 002/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.029 s | OK
+LOTE 010 | PIEZA 002/010 | COMPLETE | 6.353 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.527 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 05 | LM Guide — corte | MOTION | 1.321 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 01 | Configuración inicial | MOTION | 0.104 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.022 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 02 | Holder + encoder | PLC | 0.626 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.984 s | OK
+LOTE 010 | PIEZA 003/010 | COMPLETE | 6.315 s | HANDOFF | ENC R=56.00 mm L=55.00 mm
+LOTE 010 | PIEZA 004/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 02 | Holder + encoder | PLC | 0.621 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 03 | Alimentación L/R | MOTION | 2.280 s | PARALLEL | ENC R=55.00 mm L=56.50 mm
+LOTE 010 | PIEZA 004/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.978 s | OK
+LOTE 010 | PIEZA 004/010 | COMPLETE | 6.199 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 005/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.530 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 05 | LM Guide — corte | MOTION | 1.314 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.963 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 02 | Holder + encoder | PLC | 0.642 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 03 | Alimentación L/R | MOTION | 2.216 s | PARALLEL | ENC R=55.00 mm L=56.50 mm
+LOTE 010 | PIEZA 005/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.991 s | OK
+LOTE 010 | PIEZA 005/010 | COMPLETE | 6.259 s | HANDOFF | ENC R=55.00 mm L=56.50 mm
+LOTE 010 | PIEZA 006/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.986 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 02 | Holder + encoder | PLC | 0.610 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 03 | Alimentación L/R | MOTION | 2.316 s | PARALLEL | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 006/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.010 s | OK
+LOTE 010 | PIEZA 006/010 | COMPLETE | 6.255 s | HANDOFF | ENC R=55.00 mm L=56.50 mm
+LOTE 010 | PIEZA 007/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 05 | LM Guide — corte | MOTION | 1.344 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.997 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 02 | Holder + encoder | PLC | 0.637 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 03 | Alimentación L/R | MOTION | 2.302 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.021 s | OK
+LOTE 010 | PIEZA 007/010 | COMPLETE | 6.304 s | HANDOFF | ENC R=55.50 mm L=54.50 mm
+LOTE 010 | PIEZA 008/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.988 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 03 | Alimentación L/R | MOTION | 2.312 s | PARALLEL | ENC R=56.50 mm L=55.50 mm
+LOTE 010 | PIEZA 008/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.002 s | OK
+LOTE 010 | PIEZA 008/010 | COMPLETE | 6.292 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 01 | Configuración inicial | MOTION | 0.106 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.022 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 02 | Holder + encoder | PLC | 0.611 s | PARALLEL
+LOTE 010 | PIEZA 010/010 | STEP 03 | Alimentación L/R | MOTION | 2.221 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.967 s | OK
+LOTE 010 | PIEZA 009/010 | COMPLETE | 6.253 s | HANDOFF | ENC R=56.50 mm L=55.50 mm
+LOTE 010 | PIEZA 010/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 05 | LM Guide — corte | MOTION | 1.320 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 06 | Corte R/L | PLC | 0.364 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.936 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.873 s | OK
+LOTE 010 | PIEZA 010/010 | COMPLETE | 5.147 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | SUMMARY | 10/10 | AVG CADENCE: 6.153 s
+LOTE 010 | PIEZA 001/010 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 02 | Holder + encoder | PLC | 0.343 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | OK | ENC R=55.50 mm L=55.50 mm
+LOTE 010 | PIEZA 001/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.530 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 001/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 001/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 03 | Alimentación L/R | MOTION | 2.283 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 001/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.004 s | OK
+LOTE 010 | PIEZA 001/010 | COMPLETE | 9.141 s | FIRST | ENC R=55.50 mm L=55.50 mm
+LOTE 010 | PIEZA 002/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.504 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 010 | PIEZA 002/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 002/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.990 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 03 | Alimentación L/R | MOTION | 2.297 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 002/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.984 s | OK
+LOTE 010 | PIEZA 002/010 | COMPLETE | 6.254 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 010 | PIEZA 003/010 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 010 | PIEZA 003/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.984 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 03 | Alimentación L/R | MOTION | 2.269 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 003/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.992 s | OK
+LOTE 010 | PIEZA 003/010 | COMPLETE | 6.233 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 004/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 05 | LM Guide — corte | MOTION | 1.330 s | OK
+LOTE 010 | PIEZA 004/010 | STEP 06 | Corte R/L | PLC | 0.342 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 004/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 02 | Holder + encoder | PLC | 0.616 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 03 | Alimentación L/R | MOTION | 2.246 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 004/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.997 s | OK
+LOTE 010 | PIEZA 004/010 | COMPLETE | 6.248 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 005/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.512 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 005/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 010 | PIEZA 005/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.992 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 02 | Holder + encoder | PLC | 0.644 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 03 | Alimentación L/R | MOTION | 2.316 s | PARALLEL | ENC R=55.50 mm L=55.50 mm
+LOTE 010 | PIEZA 005/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.043 s | OK
+LOTE 010 | PIEZA 005/010 | COMPLETE | 6.328 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 006/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 006/010 | STEP 06 | Corte R/L | PLC | 0.342 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 006/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.967 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 02 | Holder + encoder | PLC | 0.611 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 03 | Alimentación L/R | MOTION | 2.299 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 006/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.998 s | OK
+LOTE 010 | PIEZA 006/010 | COMPLETE | 6.276 s | HANDOFF | ENC R=55.50 mm L=55.50 mm
+LOTE 010 | PIEZA 007/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 010 | PIEZA 007/010 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 010 | PIEZA 007/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.985 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 02 | Holder + encoder | PLC | 0.628 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 03 | Alimentación L/R | MOTION | 2.268 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 007/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.977 s | OK
+LOTE 010 | PIEZA 007/010 | COMPLETE | 6.223 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 010 | PIEZA 008/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 05 | LM Guide — corte | MOTION | 1.349 s | OK
+LOTE 010 | PIEZA 008/010 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 010 | PIEZA 008/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.976 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 02 | Holder + encoder | PLC | 0.637 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 03 | Alimentación L/R | MOTION | 2.230 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 008/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.000 s | OK
+LOTE 010 | PIEZA 008/010 | COMPLETE | 6.266 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.503 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 009/010 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 010 | PIEZA 009/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.975 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 010 | PIEZA 010/010 | STEP 03 | Alimentación L/R | MOTION | 2.298 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 009/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.020 s | OK
+LOTE 010 | PIEZA 009/010 | COMPLETE | 6.278 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | PIEZA 010/010 | STEP 04 | Pinzas — liberar holder | PLC | 0.519 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.917 s | OK
+LOTE 010 | PIEZA 010/010 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.876 s | OK
+LOTE 010 | PIEZA 010/010 | COMPLETE | 5.094 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 010 | SUMMARY | 10/10 | AVG CADENCE: 6.133 s
+LOTE 050 | PIEZA 001/050 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 050 | PIEZA 001/050 | STEP 02 | Holder + encoder | PLC | 0.278 s | OK
+LOTE 050 | PIEZA 001/050 | STEP 03 | Alimentación L/R | MOTION | 2.291 s | OK | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 001/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 050 | PIEZA 001/050 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 050 | PIEZA 001/050 | STEP 06 | Corte R/L | PLC | 0.360 s | OK
+LOTE 050 | PIEZA 002/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 001/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.985 s | OK
+LOTE 050 | PIEZA 002/050 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 050 | PIEZA 002/050 | STEP 03 | Alimentación L/R | MOTION | 2.279 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 001/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.971 s | OK
+LOTE 050 | PIEZA 001/050 | COMPLETE | 9.050 s | FIRST | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 002/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.481 s | OK
+LOTE 050 | PIEZA 002/050 | STEP 05 | LM Guide — corte | MOTION | 1.344 s | OK
+LOTE 050 | PIEZA 002/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 003/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 002/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.975 s | OK
+LOTE 050 | PIEZA 003/050 | STEP 02 | Holder + encoder | PLC | 0.610 s | PARALLEL
+LOTE 050 | PIEZA 003/050 | STEP 03 | Alimentación L/R | MOTION | 2.255 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 002/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.949 s | OK
+LOTE 050 | PIEZA 002/050 | COMPLETE | 6.207 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 003/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 003/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 003/050 | STEP 06 | Corte R/L | PLC | 0.361 s | OK
+LOTE 050 | PIEZA 004/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 003/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.985 s | OK
+LOTE 050 | PIEZA 004/050 | STEP 02 | Holder + encoder | PLC | 0.607 s | PARALLEL
+LOTE 050 | PIEZA 004/050 | STEP 03 | Alimentación L/R | MOTION | 2.305 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 003/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.995 s | OK
+LOTE 050 | PIEZA 003/050 | COMPLETE | 6.264 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 004/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 050 | PIEZA 004/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 004/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 004/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 02 | Holder + encoder | PLC | 0.642 s | PARALLEL
+LOTE 050 | PIEZA 005/050 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 004/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.008 s | OK
+LOTE 050 | PIEZA 004/050 | COMPLETE | 6.229 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 005/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 05 | LM Guide — corte | MOTION | 0.560 s | ERROR | E095 PreAlimentador: Falla de holgura en el lado L.
+LOTE 050 | PIEZA 005/050 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 02 | Holder + encoder | PLC | 0.277 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 03 | Alimentación L/R | MOTION | 2.230 s | OK | ENC R=54.50 mm L=54.50 mm
+LOTE 050 | PIEZA 005/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 005/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 006/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 005/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 050 | PIEZA 006/050 | STEP 02 | Holder + encoder | PLC | 0.617 s | PARALLEL
+LOTE 050 | PIEZA 006/050 | STEP 03 | Alimentación L/R | MOTION | 2.291 s | PARALLEL | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 005/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.992 s | OK
+LOTE 050 | PIEZA 005/050 | COMPLETE | 8.960 s | FIRST | ENC R=54.50 mm L=54.50 mm
+LOTE 050 | PIEZA 006/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 006/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 006/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 007/050 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 050 | PIEZA 006/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.991 s | OK
+LOTE 050 | PIEZA 007/050 | STEP 02 | Holder + encoder | PLC | 0.636 s | PARALLEL
+LOTE 050 | PIEZA 007/050 | STEP 03 | Alimentación L/R | MOTION | 2.276 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 006/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.997 s | OK
+LOTE 050 | PIEZA 006/050 | COMPLETE | 6.245 s | HANDOFF | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 007/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 050 | PIEZA 007/050 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 050 | PIEZA 007/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 008/050 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 050 | PIEZA 007/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.990 s | OK
+LOTE 050 | PIEZA 008/050 | STEP 02 | Holder + encoder | PLC | 0.617 s | PARALLEL
+LOTE 050 | PIEZA 008/050 | STEP 03 | Alimentación L/R | MOTION | 2.232 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 007/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.983 s | OK
+LOTE 050 | PIEZA 007/050 | COMPLETE | 6.241 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 008/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 050 | PIEZA 008/050 | STEP 05 | LM Guide — corte | MOTION | 1.337 s | OK
+LOTE 050 | PIEZA 008/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 009/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 008/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 009/050 | STEP 02 | Holder + encoder | PLC | 0.636 s | PARALLEL
+LOTE 050 | PIEZA 009/050 | STEP 03 | Alimentación L/R | MOTION | 2.277 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 008/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.996 s | OK
+LOTE 050 | PIEZA 008/050 | COMPLETE | 6.248 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 009/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.508 s | OK
+LOTE 050 | PIEZA 009/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 009/050 | STEP 06 | Corte R/L | PLC | 0.359 s | OK
+LOTE 050 | PIEZA 009/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.935 s | OK
+LOTE 050 | PIEZA 010/050 | STEP 01 | Configuración inicial | MOTION | 0.070 s | PARALLEL
+LOTE 050 | PIEZA 010/050 | STEP 02 | Holder + encoder | PLC | 0.531 s | PARALLEL
+LOTE 050 | PIEZA 010/050 | STEP 03 | Alimentación L/R | MOTION | 2.313 s | PARALLEL | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 009/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.102 s | OK
+LOTE 050 | PIEZA 009/050 | COMPLETE | 3.103 s | NORMAL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 010/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 050 | PIEZA 010/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 010/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 011/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 010/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 011/050 | STEP 02 | Holder + encoder | PLC | 0.637 s | PARALLEL
+LOTE 050 | PIEZA 011/050 | STEP 03 | Alimentación L/R | MOTION | 2.308 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 010/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.031 s | OK
+LOTE 050 | PIEZA 010/050 | COMPLETE | 6.310 s | HANDOFF | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 011/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 011/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 011/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 012/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 011/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 012/050 | STEP 02 | Holder + encoder | PLC | 0.643 s | PARALLEL
+LOTE 050 | PIEZA 012/050 | STEP 03 | Alimentación L/R | MOTION | 2.278 s | PARALLEL | ENC R=55.00 mm L=54.50 mm
+LOTE 050 | PIEZA 011/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.994 s | OK
+LOTE 050 | PIEZA 011/050 | COMPLETE | 6.220 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 012/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.506 s | OK
+LOTE 050 | PIEZA 012/050 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 050 | PIEZA 012/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 013/050 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 050 | PIEZA 012/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.990 s | OK
+LOTE 050 | PIEZA 013/050 | STEP 02 | Holder + encoder | PLC | 0.608 s | PARALLEL
+LOTE 050 | PIEZA 013/050 | STEP 03 | Alimentación L/R | MOTION | 2.254 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 012/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.944 s | OK
+LOTE 050 | PIEZA 012/050 | COMPLETE | 6.217 s | HANDOFF | ENC R=55.00 mm L=54.50 mm
+LOTE 050 | PIEZA 013/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 050 | PIEZA 013/050 | STEP 05 | LM Guide — corte | MOTION | 1.361 s | OK
+LOTE 050 | PIEZA 013/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 014/050 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 050 | PIEZA 013/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.980 s | OK
+LOTE 050 | PIEZA 014/050 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 050 | PIEZA 014/050 | STEP 03 | Alimentación L/R | MOTION | 2.294 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 013/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.017 s | OK
+LOTE 050 | PIEZA 013/050 | COMPLETE | 6.305 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 014/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 050 | PIEZA 014/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 014/050 | STEP 06 | Corte R/L | PLC | 0.344 s | OK
+LOTE 050 | PIEZA 015/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 014/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.978 s | OK
+LOTE 050 | PIEZA 015/050 | STEP 02 | Holder + encoder | PLC | 0.636 s | PARALLEL
+LOTE 050 | PIEZA 015/050 | STEP 03 | Alimentación L/R | MOTION | 2.325 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 014/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.043 s | OK
+LOTE 050 | PIEZA 014/050 | COMPLETE | 6.290 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 015/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 015/050 | STEP 05 | LM Guide — corte | MOTION | 1.321 s | OK
+LOTE 050 | PIEZA 015/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 016/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 015/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 050 | PIEZA 016/050 | STEP 02 | Holder + encoder | PLC | 0.620 s | PARALLEL
+LOTE 050 | PIEZA 016/050 | STEP 03 | Alimentación L/R | MOTION | 2.269 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 015/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.972 s | OK
+LOTE 050 | PIEZA 015/050 | COMPLETE | 6.243 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 016/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 016/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 016/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 017/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 016/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 050 | PIEZA 017/050 | STEP 02 | Holder + encoder | PLC | 0.606 s | PARALLEL
+LOTE 050 | PIEZA 017/050 | STEP 03 | Alimentación L/R | MOTION | 2.263 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 016/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.953 s | OK
+LOTE 050 | PIEZA 016/050 | COMPLETE | 6.176 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 017/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 050 | PIEZA 017/050 | STEP 05 | LM Guide — corte | MOTION | 1.314 s | OK
+LOTE 050 | PIEZA 017/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 018/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 017/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.979 s | OK
+LOTE 050 | PIEZA 018/050 | STEP 02 | Holder + encoder | PLC | 0.615 s | PARALLEL
+LOTE 050 | PIEZA 018/050 | STEP 03 | Alimentación L/R | MOTION | 2.301 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 017/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.003 s | OK
+LOTE 050 | PIEZA 017/050 | COMPLETE | 6.253 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 018/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 050 | PIEZA 018/050 | STEP 05 | LM Guide — corte | MOTION | 1.335 s | OK
+LOTE 050 | PIEZA 018/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 019/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 018/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.982 s | OK
+LOTE 050 | PIEZA 019/050 | STEP 02 | Holder + encoder | PLC | 0.613 s | PARALLEL
+LOTE 050 | PIEZA 019/050 | STEP 03 | Alimentación L/R | MOTION | 2.305 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 018/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.000 s | OK
+LOTE 050 | PIEZA 018/050 | COMPLETE | 6.257 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 019/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.530 s | OK
+LOTE 050 | PIEZA 019/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 019/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 020/050 | STEP 01 | Configuración inicial | MOTION | 0.107 s | PARALLEL
+LOTE 050 | PIEZA 019/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.026 s | OK
+LOTE 050 | PIEZA 020/050 | STEP 02 | Holder + encoder | PLC | 0.612 s | PARALLEL
+LOTE 050 | PIEZA 020/050 | STEP 03 | Alimentación L/R | MOTION | 2.289 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 019/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.989 s | OK
+LOTE 050 | PIEZA 019/050 | COMPLETE | 6.331 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 020/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.512 s | OK
+LOTE 050 | PIEZA 020/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 020/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 021/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 020/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 021/050 | STEP 02 | Holder + encoder | PLC | 0.637 s | PARALLEL
+LOTE 050 | PIEZA 021/050 | STEP 03 | Alimentación L/R | MOTION | 2.255 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 020/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.973 s | OK
+LOTE 050 | PIEZA 020/050 | COMPLETE | 6.234 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 021/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 050 | PIEZA 021/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 021/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 022/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 021/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 022/050 | STEP 02 | Holder + encoder | PLC | 0.613 s | PARALLEL
+LOTE 050 | PIEZA 022/050 | STEP 03 | Alimentación L/R | MOTION | 2.287 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 021/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.973 s | OK
+LOTE 050 | PIEZA 021/050 | COMPLETE | 6.216 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 022/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 050 | PIEZA 022/050 | STEP 05 | LM Guide — corte | MOTION | 1.334 s | OK
+LOTE 050 | PIEZA 022/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 023/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 022/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.981 s | OK
+LOTE 050 | PIEZA 023/050 | STEP 02 | Holder + encoder | PLC | 0.638 s | PARALLEL
+LOTE 050 | PIEZA 023/050 | STEP 03 | Alimentación L/R | MOTION | 2.294 s | PARALLEL | ENC R=55.00 mm L=54.50 mm
+LOTE 050 | PIEZA 022/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.013 s | OK
+LOTE 050 | PIEZA 022/050 | COMPLETE | 6.276 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 023/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.531 s | OK
+LOTE 050 | PIEZA 023/050 | STEP 05 | LM Guide — corte | MOTION | 1.324 s | OK
+LOTE 050 | PIEZA 023/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 024/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 023/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.965 s | OK
+LOTE 050 | PIEZA 024/050 | STEP 02 | Holder + encoder | PLC | 0.615 s | PARALLEL
+LOTE 050 | PIEZA 024/050 | STEP 03 | Alimentación L/R | MOTION | 2.267 s | PARALLEL | ENC R=54.50 mm L=55.50 mm
+LOTE 050 | PIEZA 023/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.990 s | OK
+LOTE 050 | PIEZA 023/050 | COMPLETE | 6.276 s | HANDOFF | ENC R=55.00 mm L=54.50 mm
+LOTE 050 | PIEZA 024/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.525 s | OK
+LOTE 050 | PIEZA 024/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 024/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 025/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 024/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 050 | PIEZA 025/050 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 050 | PIEZA 025/050 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 024/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.001 s | OK
+LOTE 050 | PIEZA 024/050 | COMPLETE | 6.281 s | HANDOFF | ENC R=54.50 mm L=55.50 mm
+LOTE 050 | PIEZA 025/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 025/050 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 050 | PIEZA 025/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 026/050 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 050 | PIEZA 025/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.989 s | OK
+LOTE 050 | PIEZA 026/050 | STEP 02 | Holder + encoder | PLC | 0.615 s | PARALLEL
+LOTE 050 | PIEZA 026/050 | STEP 03 | Alimentación L/R | MOTION | 2.283 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 025/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.979 s | OK
+LOTE 050 | PIEZA 025/050 | COMPLETE | 6.230 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 026/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 026/050 | STEP 05 | LM Guide — corte | MOTION | 1.314 s | OK
+LOTE 050 | PIEZA 026/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 027/050 | STEP 01 | Configuración inicial | MOTION | 0.073 s | PARALLEL
+LOTE 050 | PIEZA 026/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.012 s | OK
+LOTE 050 | PIEZA 027/050 | STEP 02 | Holder + encoder | PLC | 0.617 s | PARALLEL
+LOTE 050 | PIEZA 027/050 | STEP 03 | Alimentación L/R | MOTION | 2.301 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 026/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.006 s | OK
+LOTE 050 | PIEZA 026/050 | COMPLETE | 6.278 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 027/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 027/050 | STEP 05 | LM Guide — corte | MOTION | 1.343 s | OK
+LOTE 050 | PIEZA 027/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 028/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 027/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.978 s | OK
+LOTE 050 | PIEZA 028/050 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 050 | PIEZA 028/050 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 027/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.002 s | OK
+LOTE 050 | PIEZA 027/050 | COMPLETE | 6.266 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 028/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.484 s | OK
+LOTE 050 | PIEZA 028/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 028/050 | STEP 06 | Corte R/L | PLC | 0.362 s | OK
+LOTE 050 | PIEZA 029/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 028/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.969 s | OK
+LOTE 050 | PIEZA 029/050 | STEP 02 | Holder + encoder | PLC | 0.640 s | PARALLEL
+LOTE 050 | PIEZA 029/050 | STEP 03 | Alimentación L/R | MOTION | 2.284 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 028/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.008 s | OK
+LOTE 050 | PIEZA 028/050 | COMPLETE | 6.265 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 029/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 050 | PIEZA 029/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 029/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 030/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 029/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 030/050 | STEP 02 | Holder + encoder | PLC | 0.634 s | PARALLEL
+LOTE 050 | PIEZA 030/050 | STEP 03 | Alimentación L/R | MOTION | 2.264 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 029/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.981 s | OK
+LOTE 050 | PIEZA 029/050 | COMPLETE | 6.214 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 030/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.487 s | OK
+LOTE 050 | PIEZA 030/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 030/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 031/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 030/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 050 | PIEZA 031/050 | STEP 02 | Holder + encoder | PLC | 0.644 s | PARALLEL
+LOTE 050 | PIEZA 031/050 | STEP 03 | Alimentación L/R | MOTION | 2.303 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 030/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.027 s | OK
+LOTE 050 | PIEZA 030/050 | COMPLETE | 6.254 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 031/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 031/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 031/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 032/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 031/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.983 s | OK
+LOTE 050 | PIEZA 032/050 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 050 | PIEZA 032/050 | STEP 03 | Alimentación L/R | MOTION | 2.290 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 031/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.014 s | OK
+LOTE 050 | PIEZA 031/050 | COMPLETE | 6.266 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 032/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.526 s | OK
+LOTE 050 | PIEZA 032/050 | STEP 05 | LM Guide — corte | MOTION | 1.330 s | OK
+LOTE 050 | PIEZA 032/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 033/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 032/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.973 s | OK
+LOTE 050 | PIEZA 033/050 | STEP 02 | Holder + encoder | PLC | 0.625 s | PARALLEL
+LOTE 050 | PIEZA 033/050 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 032/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.987 s | OK
+LOTE 050 | PIEZA 032/050 | COMPLETE | 6.279 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 033/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.506 s | OK
+LOTE 050 | PIEZA 033/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 033/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 034/050 | STEP 01 | Configuración inicial | MOTION | 0.083 s | PARALLEL
+LOTE 050 | PIEZA 033/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.001 s | OK
+LOTE 050 | PIEZA 034/050 | STEP 02 | Holder + encoder | PLC | 0.611 s | PARALLEL
+LOTE 050 | PIEZA 034/050 | STEP 03 | Alimentación L/R | MOTION | 2.214 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 033/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.959 s | OK
+LOTE 050 | PIEZA 033/050 | COMPLETE | 6.247 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 034/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.508 s | OK
+LOTE 050 | PIEZA 034/050 | STEP 05 | LM Guide — corte | MOTION | 1.319 s | OK
+LOTE 050 | PIEZA 034/050 | STEP 06 | Corte R/L | PLC | 0.342 s | OK
+LOTE 050 | PIEZA 035/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 034/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.965 s | OK
+LOTE 050 | PIEZA 035/050 | STEP 02 | Holder + encoder | PLC | 0.638 s | PARALLEL
+LOTE 050 | PIEZA 035/050 | STEP 03 | Alimentación L/R | MOTION | 2.280 s | PARALLEL | ENC R=55.50 mm L=54.50 mm
+LOTE 050 | PIEZA 034/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.001 s | OK
+LOTE 050 | PIEZA 034/050 | COMPLETE | 6.263 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 035/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 035/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 035/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 036/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 035/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 036/050 | STEP 02 | Holder + encoder | PLC | 0.638 s | PARALLEL
+LOTE 050 | PIEZA 036/050 | STEP 03 | Alimentación L/R | MOTION | 2.295 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 035/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.018 s | OK
+LOTE 050 | PIEZA 035/050 | COMPLETE | 6.252 s | HANDOFF | ENC R=55.50 mm L=54.50 mm
+LOTE 050 | PIEZA 036/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 050 | PIEZA 036/050 | STEP 05 | LM Guide — corte | MOTION | 1.345 s | OK
+LOTE 050 | PIEZA 036/050 | STEP 06 | Corte R/L | PLC | 0.337 s | OK
+LOTE 050 | PIEZA 037/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 036/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.978 s | OK
+LOTE 050 | PIEZA 037/050 | STEP 02 | Holder + encoder | PLC | 0.610 s | PARALLEL
+LOTE 050 | PIEZA 037/050 | STEP 03 | Alimentación L/R | MOTION | 2.291 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 036/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.980 s | OK
+LOTE 050 | PIEZA 036/050 | COMPLETE | 6.245 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 037/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.502 s | OK
+LOTE 050 | PIEZA 037/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 037/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 037/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.967 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 02 | Holder + encoder | PLC | 0.626 s | PARALLEL
+LOTE 050 | PIEZA 038/050 | STEP 03 | Alimentación L/R | MOTION | 2.262 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 037/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.972 s | OK
+LOTE 050 | PIEZA 037/050 | COMPLETE | 6.215 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 038/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.527 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 05 | LM Guide — corte | MOTION | 0.213 s | ERROR | E095 PreAlimentador: Falla de holgura en el lado L.
+LOTE 050 | PIEZA 038/050 | STEP 01 | Configuración inicial | MOTION | 0.019 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 02 | Holder + encoder | PLC | 0.300 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 03 | Alimentación L/R | MOTION | 2.247 s | OK | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 038/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.486 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 038/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 039/050 | STEP 01 | Configuración inicial | MOTION | 0.052 s | PARALLEL
+LOTE 050 | PIEZA 038/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.989 s | OK
+LOTE 050 | PIEZA 039/050 | STEP 02 | Holder + encoder | PLC | 0.633 s | PARALLEL
+LOTE 050 | PIEZA 039/050 | STEP 03 | Alimentación L/R | MOTION | 2.287 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 038/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.004 s | OK
+LOTE 050 | PIEZA 038/050 | COMPLETE | 9.042 s | FIRST | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 039/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 039/050 | STEP 05 | LM Guide — corte | MOTION | 1.315 s | OK
+LOTE 050 | PIEZA 039/050 | STEP 06 | Corte R/L | PLC | 0.342 s | OK
+LOTE 050 | PIEZA 040/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 039/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 040/050 | STEP 02 | Holder + encoder | PLC | 0.628 s | PARALLEL
+LOTE 050 | PIEZA 040/050 | STEP 03 | Alimentación L/R | MOTION | 2.256 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 039/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.971 s | OK
+LOTE 050 | PIEZA 039/050 | COMPLETE | 6.248 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 040/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 050 | PIEZA 040/050 | STEP 05 | LM Guide — corte | MOTION | 1.328 s | OK
+LOTE 050 | PIEZA 040/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 041/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 040/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.974 s | OK
+LOTE 050 | PIEZA 041/050 | STEP 02 | Holder + encoder | PLC | 0.635 s | PARALLEL
+LOTE 050 | PIEZA 041/050 | STEP 03 | Alimentación L/R | MOTION | 2.282 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 040/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.998 s | OK
+LOTE 050 | PIEZA 040/050 | COMPLETE | 6.245 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 041/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.488 s | OK
+LOTE 050 | PIEZA 041/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 041/050 | STEP 06 | Corte R/L | PLC | 0.338 s | OK
+LOTE 050 | PIEZA 042/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 041/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.967 s | OK
+LOTE 050 | PIEZA 042/050 | STEP 02 | Holder + encoder | PLC | 0.614 s | PARALLEL
+LOTE 050 | PIEZA 042/050 | STEP 03 | Alimentación L/R | MOTION | 2.285 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 041/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.983 s | OK
+LOTE 050 | PIEZA 041/050 | COMPLETE | 6.214 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 042/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.512 s | OK
+LOTE 050 | PIEZA 042/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 042/050 | STEP 06 | Corte R/L | PLC | 0.341 s | OK
+LOTE 050 | PIEZA 043/050 | STEP 01 | Configuración inicial | MOTION | 0.083 s | PARALLEL
+LOTE 050 | PIEZA 042/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 1.002 s | OK
+LOTE 050 | PIEZA 043/050 | STEP 02 | Holder + encoder | PLC | 0.605 s | PARALLEL
+LOTE 050 | PIEZA 043/050 | STEP 03 | Alimentación L/R | MOTION | 2.277 s | PARALLEL | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 042/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.970 s | OK
+LOTE 050 | PIEZA 042/050 | COMPLETE | 6.267 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 043/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.506 s | OK
+LOTE 050 | PIEZA 043/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 043/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 044/050 | STEP 01 | Configuración inicial | MOTION | 0.071 s | PARALLEL
+LOTE 050 | PIEZA 043/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.989 s | OK
+LOTE 050 | PIEZA 044/050 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 050 | PIEZA 044/050 | STEP 03 | Alimentación L/R | MOTION | 2.263 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 043/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.983 s | OK
+LOTE 050 | PIEZA 043/050 | COMPLETE | 6.260 s | HANDOFF | ENC R=54.50 mm L=55.00 mm
+LOTE 050 | PIEZA 044/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.522 s | OK
+LOTE 050 | PIEZA 044/050 | STEP 05 | LM Guide — corte | MOTION | 1.388 s | OK
+LOTE 050 | PIEZA 044/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 045/050 | STEP 01 | Configuración inicial | MOTION | 0.072 s | PARALLEL
+LOTE 050 | PIEZA 044/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.997 s | OK
+LOTE 050 | PIEZA 045/050 | STEP 02 | Holder + encoder | PLC | 0.641 s | PARALLEL
+LOTE 050 | PIEZA 045/050 | STEP 03 | Alimentación L/R | MOTION | 2.295 s | PARALLEL | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 044/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.020 s | OK
+LOTE 050 | PIEZA 044/050 | COMPLETE | 6.388 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 045/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.508 s | OK
+LOTE 050 | PIEZA 045/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 045/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 046/050 | STEP 01 | Configuración inicial | MOTION | 0.048 s | PARALLEL
+LOTE 050 | PIEZA 045/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.964 s | OK
+LOTE 050 | PIEZA 046/050 | STEP 02 | Holder + encoder | PLC | 0.639 s | PARALLEL
+LOTE 050 | PIEZA 046/050 | STEP 03 | Alimentación L/R | MOTION | 2.308 s | PARALLEL | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 045/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.031 s | OK
+LOTE 050 | PIEZA 045/050 | COMPLETE | 6.278 s | HANDOFF | ENC R=55.50 mm L=55.50 mm
+LOTE 050 | PIEZA 046/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 046/050 | STEP 05 | LM Guide — corte | MOTION | 1.317 s | OK
+LOTE 050 | PIEZA 046/050 | STEP 06 | Corte R/L | PLC | 0.340 s | OK
+LOTE 050 | PIEZA 047/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 046/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 047/050 | STEP 02 | Holder + encoder | PLC | 0.629 s | PARALLEL
+LOTE 050 | PIEZA 047/050 | STEP 03 | Alimentación L/R | MOTION | 2.295 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 046/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 3.008 s | OK
+LOTE 050 | PIEZA 046/050 | COMPLETE | 6.285 s | HANDOFF | ENC R=55.50 mm L=55.00 mm
+LOTE 050 | PIEZA 047/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 050 | PIEZA 047/050 | STEP 05 | LM Guide — corte | MOTION | 1.318 s | OK
+LOTE 050 | PIEZA 047/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 048/050 | STEP 01 | Configuración inicial | MOTION | 0.051 s | PARALLEL
+LOTE 050 | PIEZA 047/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.966 s | OK
+LOTE 050 | PIEZA 048/050 | STEP 02 | Holder + encoder | PLC | 0.647 s | PARALLEL
+LOTE 050 | PIEZA 048/050 | STEP 03 | Alimentación L/R | MOTION | 2.212 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 047/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.984 s | OK
+LOTE 050 | PIEZA 047/050 | COMPLETE | 6.212 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 048/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.485 s | OK
+LOTE 050 | PIEZA 048/050 | STEP 05 | LM Guide — corte | MOTION | 1.316 s | OK
+LOTE 050 | PIEZA 048/050 | STEP 06 | Corte R/L | PLC | 0.371 s | OK
+LOTE 050 | PIEZA 049/050 | STEP 01 | Configuración inicial | MOTION | 0.050 s | PARALLEL
+LOTE 050 | PIEZA 048/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.968 s | OK
+LOTE 050 | PIEZA 049/050 | STEP 02 | Holder + encoder | PLC | 0.612 s | PARALLEL
+LOTE 050 | PIEZA 049/050 | STEP 03 | Alimentación L/R | MOTION | 2.267 s | PARALLEL | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 048/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.966 s | OK
+LOTE 050 | PIEZA 048/050 | COMPLETE | 6.229 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 049/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.483 s | OK
+LOTE 050 | PIEZA 049/050 | STEP 05 | LM Guide — corte | MOTION | 1.331 s | OK
+LOTE 050 | PIEZA 049/050 | STEP 06 | Corte R/L | PLC | 0.339 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 01 | Configuración inicial | MOTION | 0.049 s | PARALLEL
+LOTE 050 | PIEZA 049/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.971 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 02 | Holder + encoder | PLC | 0.610 s | PARALLEL
+LOTE 050 | PIEZA 050/050 | STEP 03 | Alimentación L/R | MOTION | 2.249 s | PARALLEL | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | PIEZA 049/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 2.992 s | OK
+LOTE 050 | PIEZA 049/050 | COMPLETE | 6.238 s | HANDOFF | ENC R=55.00 mm L=55.50 mm
+LOTE 050 | PIEZA 050/050 | STEP 04 | Pinzas — liberar holder | PLC | 0.482 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 05 | LM Guide — corte | MOTION | 1.321 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 06 | Corte R/L | PLC | 0.361 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 07 | Descarga de pieza | PLC+MOTION | 0.918 s | OK
+LOTE 050 | PIEZA 050/050 | STEP 08 | Regreso Home + blower | PLC+MOTION | 1.875 s | OK
+LOTE 050 | PIEZA 050/050 | COMPLETE | 5.128 s | HANDOFF | ENC R=55.00 mm L=55.00 mm
+LOTE 050 | SUMMARY | 50/50 | AVG CADENCE: 6.164 s

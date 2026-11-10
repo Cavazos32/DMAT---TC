@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 // Lado: comentar la línea siguiente para L, descomentar para R (misma base de firmware).
-//#define PF_SIDE_RIGHT
+#define PF_SIDE_RIGHT
 
 #ifndef PF_CONFIG_SIDE
 #if defined(PF_SIDE_RIGHT)
@@ -60,8 +60,8 @@ constexpr uint8_t SERVO_LEDC_BITS = 14;
 
 // FeedMotor. El maestro puede reemplazar FEED_RPM en marcha.
 constexpr uint16_t MOTOR_MICROSTEP = 16;
-constexpr float MOTOR_ACCEL = 1000.0f;
-constexpr float MOTOR_DECEL = 1000.0f;
+constexpr float MOTOR_ACCEL = 3000.0f;
+constexpr float MOTOR_DECEL = 3000.0f;
 constexpr float RPM_MIN = 1.0f;
 constexpr float RPM_MAX = 600.0f;
 constexpr float FEED_RPM = 60.0f;

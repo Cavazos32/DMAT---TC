@@ -82,16 +82,24 @@ static void FeedMotor(float rpm) {
     feeder->Brake();
     commandedFeederRpm = 0.0f;
   }
+  // Parada suave: no usar Brake() en ciclo (resetea RMT y corta la rampa).
   if (rpm <= 0.5f || rpm < RPM_MIN) {
-    if (commandedFeederRpm > 0.01f) {
-      feeder->Brake();
+    if (commandedFeederRpm > 0.01f || feeder->targetRPM() > 0.01f ||
+        fabsf(feeder->currentRPM()) > 0.01f) {
+      feeder->setSpeed(0.0f);
       commandedFeederRpm = 0.0f;
     }
     return;
   }
   rpm = constrain(rpm, RPM_MIN, RPM_MAX);
-  if (fabsf(commandedFeederRpm - rpm) <= 0.5f) return;
-  if (feeder->setSpeed(rpm, MOTOR_ACCEL)) commandedFeederRpm = rpm;
+  const float tgt = feeder->targetRPM();
+  const float cur = fabsf(feeder->currentRPM());
+  // Reenviar si cambió el setpoint, se perdió el target, o quedó clavado en 0.
+  const bool needCmd = fabsf(commandedFeederRpm - rpm) > 0.5f ||
+                       fabsf(tgt - rpm) > 0.5f ||
+                       (cur < 0.5f && tgt < 0.5f);
+  if (!needCmd) return;
+  if (feeder->setSpeed(rpm)) commandedFeederRpm = rpm;
 }
 
 // --- FeedServo: neutral, o el pulso recibido mientras debe correr. ---
@@ -277,7 +285,11 @@ static void serviceHolguraFeed(uint32_t nowMs, const SensorSnapshot& s, const Fe
   holguraLastOn = on;
 
   if (holguraPhase == HOLG_WAIT_ON) {
-    if (rising || (on && !holguraSawOn)) holguraOnRisingEdge(nowMs, p);
+    if (rising || (on && !holguraSawOn)) {
+      holguraOnRisingEdge(nowMs, p);
+      feederDemand = true;  // sigue a settle sin frenar el stepper
+      return;
+    }
     feederDemand = !on;
     return;
   }

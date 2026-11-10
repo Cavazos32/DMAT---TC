@@ -90,8 +90,13 @@ _serial_cfg = {
 
 # Orquestador del ciclo automático (rules.md §4.1–4.8) — app.py coordina Motion + PLC.
 _STATE_LOCK = threading.Lock()
+# Candado de arranque: un solo Start/Resume/Charola a la vez (evita workers gemelos).
+_CYCLE_SPAWN_LOCK = threading.Lock()
+_CYCLE_WORKER_TLS = threading.local()
 _CYCLE_CTRL = {
     "thread": None,
+    # Generación del worker oficial. Un hilo huérfano ve gen ≠ la suya y se detiene.
+    "gen": 0,
     "stop": threading.Event(),
     "pause_after_step": threading.Event(),
     # Prueba desde Parámetros → Ciclo: un paso, pausa, «Siguiente paso».
@@ -136,8 +141,11 @@ _LOT = {
 _LAST_PIECE_S = 0.0
 # Marca de fin de la pieza anterior (lote). Tiempo de ciclo en régimen = cadencia entre salidas.
 _PREV_PIECE_END_T: float | None = None
-# Longitud ya medida de la pieza que se está cortando. El soplo la usa
-# aunque el paso 3 del ciclo siguiente termine durante el regreso a home.
+# Reloj vivo de la pieza / lote (para HMI: estimado y corriendo).
+_PIECE_TICK0: float | None = None
+_LOT_T0: float | None = None
+# Longitud programada de la pieza en curso (para duración del blower).
+# Se conserva aunque el paso 3 del ciclo siguiente termine durante el regreso a home.
 _PIECE_BLOWER_MM = None
 # Lectura de encoder L/R de la pieza en curso (no se pisa con el solape).
 _PIECE_FEED = {"R": None, "L": None}
@@ -391,6 +399,8 @@ _MACHINE_STATE = {
     "rutina": "",
     "rutina_fase": "",
     "rutina_manos": False,
+    # Tras cualquier error: Reset → purga obligatoria → luego Reanudar/Start.
+    "post_error_purga": False,
     "omitir_holgura_l": False,
     "omitir_holgura_r": False,
     "ciclos_mant": 0,
@@ -1085,21 +1095,33 @@ def _serial_rx_flush(ser) -> None:
         pass
 
 
-def _read_serial_line(ser, timeout_s: float) -> str:
-    deadline = time.time() + timeout_s
-    buf = b""
+def _read_serial_line(
+    ser, timeout_s: float, carry: bytearray | None = None
+) -> str:
+    """Lee una línea terminada en \\n.
+
+    Si se pasa carry, los bytes sin \\n se conservan entre llamadas (no se
+    reportan como línea). Sin carry, al timeout se devuelve lo parcial — solo
+    para lecturas one-shot con espera larga.
+    """
+    buf = carry if carry is not None else bytearray()
+    deadline = time.time() + max(0.0, float(timeout_s))
     while time.time() < deadline:
         # Leer hasta el fin de línea sin consumir bytes de la respuesta
         # siguiente. read(in_waiting) descartaba todo lo posterior al primer \n.
         chunk = ser.read(1)
         if chunk:
             if chunk == b"\n":
-                return buf.decode("utf-8", "replace").strip()
+                line = bytes(buf).decode("utf-8", "replace").strip()
+                del buf[:]
+                return line
             if chunk != b"\r":
-                buf += chunk
+                buf.extend(chunk)
         else:
             time.sleep(0.02)
-    return buf.decode("utf-8", "replace").strip()
+    if carry is None and buf:
+        return bytes(buf).decode("utf-8", "replace").strip()
+    return ""
 
 
 def _read_lines_until_op(
@@ -1114,13 +1136,14 @@ def _read_lines_until_op(
     """Lee líneas completas hasta la respuesta pedida, conservando las intermedias.
 
     inject() corre con el candado de escritura: None sigue esperando, [] no
-    escribe, una lista se manda una sola vez. La orden principal (p. ej.
-    lmguide_move) no espera feed_stage: la alimentación en paralelo se recolecta
-    aparte para no detener home del ciclo en curso.
+    escribe, una lista se manda una sola vez. Con inject activo se usan
+    rebanadas cortas de lectura; carry evita partir un JSON a mitad de línea
+    (p. ej. `{` + resto) y colgar el paso 8 del solape.
     """
     out: list[str] = []
     seen: set[str] = set()
     injected = False
+    carry = bytearray()
     deadline = time.time() + max(0.05, budget_s)
     abort_drain_until = 0.0
 
@@ -1177,8 +1200,13 @@ def _read_lines_until_op(
             break
         if abort_drain_until > 0.0:
             rem = min(rem, max(0.02, abort_drain_until - time.time()))
-        slice_s = 0.15 if (inject is not None and not injected) else min(2.0, rem)
-        line = _read_serial_line(ser, min(slice_s, rem))
+        # Con inject pendiente (holder aún no listo) rebanar para reintentar inject;
+        # si ya hay bytes parciales, alargar la rebanada para no cortar el JSON.
+        if inject is not None and not injected and not carry:
+            slice_s = 0.15
+        else:
+            slice_s = min(2.0, rem)
+        line = _read_serial_line(ser, min(slice_s, rem), carry)
         if _consume(line):
             break
         if not line:
@@ -1660,6 +1688,8 @@ def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None
             _set_machine_ui(mensaje=msg, ciclo_error=primary)
         return
     _push_event(msg, "error")
+    with _STATE_LOCK:
+        _MACHINE_STATE["post_error_purga"] = True
     _set_machine_ui(
         estado="error",
         estado_label="Error",
@@ -1670,21 +1700,8 @@ def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None
 
 
 def _prefeeder_maybe_clear_idle_error() -> None:
-    """Si el PreFeeder ya no tiene falla y no hay ciclo, quita el error del banner."""
-    with _STATE_LOCK:
-        if _MACHINE_STATE.get("ciclo_en_curso") or _MACHINE_STATE.get("rutina"):
-            return
-        if _MACHINE_STATE.get("estado") != "error":
-            return
-        code = str(_MACHINE_STATE.get("ciclo_error") or "").strip()
-        if code and not code.startswith("E09"):
-            return
-    _set_machine_ui(
-        estado="idle",
-        estado_label="En espera",
-        ciclo_error="",
-        mensaje="Sistema listo. Sin errores activos.",
-    )
+    """Ya no limpia sola: tras cualquier error el operador debe Reset y luego purga."""
+    return
 
 
 def _prefeeder_raise_fault(sig: tuple[str, ...]) -> None:
@@ -2435,6 +2452,24 @@ def _cycle_progress_pct(step_index: int) -> int:
     return int(round(min(100, max(0, (step_index / n) * 100))))
 
 
+def _lot_progress_pct(step_index: int | None = None) -> int:
+    """Avance del lote (ciclos hechos / total). Fracción del paso actual si hay pieza en curso."""
+    total = int(_LOT.get("cycles_total") or 0)
+    if total <= 0:
+        if step_index is not None:
+            return _cycle_progress_pct(int(step_index))
+        return 0
+    done = int(_LOT.get("cycles_done") or 0)
+    if done >= total:
+        return 100
+    frac = 0.0
+    if (_LOT.get("active") or _LOT.get("tray_wait")) and step_index is not None:
+        n = len(CYCLE_STEPS)
+        if n > 0:
+            frac = min(1.0, max(0.0, float(step_index) / float(n)))
+    return int(round(min(100, max(0, ((done + frac) / total) * 100))))
+
+
 def _now_hms() -> str:
     return time.strftime("%H:%M:%S")
 
@@ -2512,6 +2547,7 @@ def _andon_publish_from_state() -> None:
 
 
 def _public_machine_state() -> dict:
+    estimado_s, corriendo_s = _lot_times_now()
     with _STATE_LOCK:
         state = dict(_MACHINE_STATE)
         state["checklist"] = dict(_MACHINE_STATE.get("checklist") or {})
@@ -2521,9 +2557,31 @@ def _public_machine_state() -> dict:
         state["ciclo_feed"] = dict(_MACHINE_STATE.get("ciclo_feed") or {})
         state["charola_llena"] = bool(_LOT["tray_wait"])
         state["charola_ciclos"] = int(_LOT["deposits_per_tray"] or 0) if _LOT["tray_wait"] else 0
-        state["lote_ciclos_hechos"] = int(_LOT["cycles_done"] or 0)
-        state["lote_ciclos_total"] = int(_LOT["cycles_total"] or 0)
+        state["lote_activo"] = bool(_LOT["active"] or _LOT["tray_wait"])
+        done_c = int(_LOT["cycles_done"] or 0)
+        total_c = int(_LOT["cycles_total"] or 0)
+        state["lote_ciclos_hechos"] = done_c
+        state["lote_ciclos_total"] = total_c
         state["lote_lados"] = _LOT["sides"]
+        mult = _lot_piece_mult()
+        lote_vivo = bool(_LOT["active"] or _LOT["tray_wait"])
+        lote_terminado = (not lote_vivo) and total_c > 0 and done_c >= total_c
+        if lote_vivo or lote_terminado:
+            state["piezas_producidas"] = done_c * mult
+            state["piezas_total"] = total_c * mult
+        else:
+            state["piezas_producidas"] = 0
+            state["piezas_total"] = int(state.get("cantidad") or 0)
+        if total_c > 0:
+            state["progreso_pct"] = _lot_progress_pct(state.get("ciclo_paso_indice"))
+        if estimado_s is not None:
+            state["tiempo_estimado_s"] = estimado_s
+        elif lote_terminado:
+            state["tiempo_estimado_s"] = 0
+        elif not (lote_vivo or state.get("ciclo_en_curso")):
+            state["tiempo_estimado_s"] = None
+        if lote_vivo or state.get("ciclo_en_curso"):
+            state["tiempo_corriendo_s"] = corriendo_s
         state["feed_sides"] = _feed_sides_of(_load_cycle_params())
         state["prefeeder"] = _prefeeder_public_summary()
         state["ciclo_paso_a_paso"] = bool(_CYCLE_CTRL.get("step_mode"))
@@ -2559,7 +2617,10 @@ def _set_machine_ui(
         if step_index is not None:
             _MACHINE_STATE["ciclo_paso_indice"] = step_index
             if progreso_pct is None:
-                _MACHINE_STATE["progreso_pct"] = _cycle_progress_pct(step_index)
+                if int(_LOT.get("cycles_total") or 0) > 0:
+                    _MACHINE_STATE["progreso_pct"] = _lot_progress_pct(step_index)
+                else:
+                    _MACHINE_STATE["progreso_pct"] = _cycle_progress_pct(step_index)
         if paralelo_id is not None:
             _MACHINE_STATE["ciclo_paralelo_id"] = paralelo_id
         if progreso_pct is not None:
@@ -2582,15 +2643,87 @@ def _cycle_should_stop() -> bool:
 
 
 def _cycle_error_active() -> bool:
-    """Error de ciclo mientras el hilo del lote sigue vivo (p. ej. falla PreFeeder en paralelo)."""
-    if not _cycle_thread_alive():
-        return False
+    """Error de ciclo latched. Sigue activo aunque el hilo ya haya muerto tras el fallo."""
     with _STATE_LOCK:
-        return bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+        has_err = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+        en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+    if not has_err:
+        return False
+    # Idle con fallo de módulo (sin lote) no debe abortar envíos ajenos al ciclo.
+    return en_curso or bool(_LOT.get("active") or _LOT.get("tray_wait")) or _cycle_thread_alive()
+
+
+def _lot_piece_mult(sides: str | None = None) -> int:
+    s = (sides if sides is not None else _LOT.get("sides") or "R").upper()
+    return 2 if s in ("LR", "RL", "BOTH", "AMBOS") else 1
+
+
+def _lot_avg_cycle_s() -> float | None:
+    if _PROD_CADENCE_SAMPLES:
+        return sum(_PROD_CADENCE_SAMPLES) / len(_PROD_CADENCE_SAMPLES)
+    if _LAST_PIECE_S and _LAST_PIECE_S > 0:
+        return float(_LAST_PIECE_S)
+    return None
+
+
+def _lot_times_now() -> tuple[float | None, float]:
+    """(tiempo_estimado_s restante del lote, tiempo_corriendo_s del lote o de la pieza)."""
+    now = time.time()
+    with _STATE_LOCK:
+        estado = _MACHINE_STATE.get("estado")
+        en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+        frozen = float(_MACHINE_STATE.get("tiempo_corriendo_s") or 0)
+    lote_vivo = bool(_LOT.get("active") or _LOT.get("tray_wait"))
+    corriendo = 0.0
+    if lote_vivo and _LOT_T0 is not None:
+        # Reloj del lote completo (no se reinicia por pieza).
+        corriendo = max(0.0, now - _LOT_T0)
+    elif en_curso:
+        if estado in ("paused", "error"):
+            # Congelado en pausa/error; no sigue sumando.
+            if _PIECE_TICK0 is not None and frozen <= 0:
+                corriendo = max(0.0, now - _PIECE_TICK0)
+            else:
+                corriendo = max(0.0, frozen)
+        elif _PIECE_TICK0 is not None:
+            corriendo = max(0.0, now - _PIECE_TICK0)
+    estimado = None
+    if lote_vivo:
+        avg = _lot_avg_cycle_s()
+        if avg is not None and avg > 0:
+            total = int(_LOT.get("cycles_total") or 0)
+            done = int(_LOT.get("cycles_done") or 0)
+            remaining = max(0, total - done)
+            if remaining <= 0:
+                estimado = 0.0
+            else:
+                piece_elapsed = 0.0
+                if _PIECE_TICK0 is not None and en_curso:
+                    piece_elapsed = max(0.0, now - _PIECE_TICK0)
+                if en_curso:
+                    rest_current = max(0.0, avg - piece_elapsed)
+                    estimado = rest_current + max(0, remaining - 1) * avg
+                else:
+                    estimado = remaining * avg
+    return (
+        round(estimado, 1) if estimado is not None else None,
+        round(corriendo, 1),
+    )
+
+
+def _cycle_worker_is_current(gen: int) -> bool:
+    """False si este hilo ya no es el worker oficial (Stop / nuevo Start / huérfano)."""
+    return int(_CYCLE_CTRL.get("gen") or 0) == int(gen)
 
 
 def _cycle_should_abort() -> bool:
-    return _cycle_should_stop() or _cycle_error_active()
+    if _cycle_should_stop() or _cycle_error_active():
+        return True
+    # Hilo de ciclo (o auxiliar) marcado con gen: si ya no es el oficial, abortar.
+    my_gen = getattr(_CYCLE_WORKER_TLS, "gen", None)
+    if my_gen is not None and not _cycle_worker_is_current(my_gen):
+        return True
+    return False
 
 
 def _cycle_motion_halt_for_error() -> None:
@@ -2603,6 +2736,30 @@ def _cycle_motion_halt_for_error() -> None:
 def _cycle_thread_alive() -> bool:
     thread = _CYCLE_CTRL["thread"]
     return thread is not None and thread.is_alive()
+
+
+def _cycle_spawn_worker(start_index: int, *, locked: bool = False) -> tuple[bool, str]:
+    """Arranca exactamente un worker. Rechaza si ya hay uno vivo."""
+
+    def _do() -> tuple[bool, str]:
+        if _cycle_thread_alive():
+            return False, "Hay un ciclo en ejecución."
+        _CYCLE_CTRL["gen"] = int(_CYCLE_CTRL.get("gen") or 0) + 1
+        gen = int(_CYCLE_CTRL["gen"])
+        th = threading.Thread(
+            target=_cycle_worker,
+            args=(start_index, gen),
+            daemon=True,
+            name=f"cycle-worker-{gen}",
+        )
+        _CYCLE_CTRL["thread"] = th
+        th.start()
+        return True, ""
+
+    if locked:
+        return _do()
+    with _CYCLE_SPAWN_LOCK:
+        return _do()
 
 
 def _motion_owner_busy() -> str:
@@ -2765,18 +2922,21 @@ def _measured_feed_length_mm() -> Optional[float]:
     return _feed_dict_length_mm(_MACHINE_STATE.get("ciclo_feed") or {})
 
 
+def _cycle_blower_length_mm() -> float:
+    # Reglas §4.8: duración del blower = longitud programada de la pieza.
+    # La medición de encoder no define el soplo (puede ser parcial o con validación off).
+    prog = _num(_MOTION_DATA.get("target_length_mm"), 0.0)
+    if prog > 0:
+        return prog
+    snap = _num(_PIECE_BLOWER_MM, 0.0)
+    if snap > 0:
+        return snap
+    measured = _measured_feed_length_mm()
+    return _num(measured, 0.0)
+
+
 def _cycle_blower_duration_ms(params: dict) -> int:
-    # Duración del pulso: proporcional a la longitud de pieza. Preferir medición real
-    # del paso de alimentación; si no hay datos, usar la longitud objetivo del modelo.
-    length = _PIECE_BLOWER_MM
-    if length is None or length <= 0:
-        length = _measured_feed_length_mm()
-    if length is None or length <= 0:
-        length = _MOTION_DATA.get("target_length_mm")
-    try:
-        length_f = float(length) if length is not None else 0.0
-    except (TypeError, ValueError):
-        length_f = 0.0
+    length_f = _cycle_blower_length_mm()
     per_mm = float(params.get("blower_ms_per_mm") or 8.0)
     minimum = int(params.get("blower_ms_min") or 200)
     ms = int(round(length_f * per_mm))
@@ -2808,17 +2968,26 @@ def _cycle_enter_step(step_id: str, step_index: int) -> None:
         msg = msg + f" Ciclo {nxt} de {total} alimenta en paralelo."
     with _STATE_LOCK:
         keep_error = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
-    ui_kw = dict(
+        err_estado = _MACHINE_STATE.get("estado") == "error"
+    if keep_error:
+        # No pisar el estado de error: la secuencia queda pausada hasta Reset.
+        _set_machine_ui(
+            step_id=step_id,
+            step_index=step_index,
+            en_curso=True,
+            estado="error" if err_estado or keep_error else estado,
+            estado_label="Error",
+        )
+        return
+    _set_machine_ui(
         estado=estado,
         estado_label=elabel,
         mensaje=msg,
         step_id=step_id,
         step_index=step_index,
         en_curso=True,
+        ciclo_error="",
     )
-    if not keep_error:
-        ui_kw["ciclo_error"] = ""
-    _set_machine_ui(**ui_kw)
 
 
 def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
@@ -2826,31 +2995,45 @@ def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
     with _STATE_LOCK:
         in_error = _MACHINE_STATE.get("estado") == "error"
         had_code = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
-    # Si ya hay un error latched, no lo pises con un E043/E000 secundario.
-    if in_error and had_code:
+        was_en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+    # Error ya latched: no re-disparar eventos ni pisar el código (aunque el UI
+    # se haya movido a running por un hilo huérfano).
+    if had_code:
+        if not in_error:
+            _set_machine_ui(
+                estado="error",
+                estado_label="Error",
+                en_curso=True,
+            )
         return
-    first = not in_error
-    if first:
+    if not in_error:
         _push_event(msg, "error")
-    # Estado primero: si el log falla, el ciclo igual queda en pausa por error.
+    # Lote / ciclo en curso no se borran por error: solo Stop (o fin normal) lo hace.
+    keep_lot = bool(_LOT.get("active") or _LOT.get("tray_wait") or was_en_curso)
+    freeze_s = None
+    if keep_lot and _PIECE_TICK0 is not None:
+        freeze_s = round(max(0.0, time.time() - _PIECE_TICK0), 1)
+    with _STATE_LOCK:
+        _MACHINE_STATE["post_error_purga"] = True
     _set_machine_ui(
         estado="error",
         estado_label="Error",
         mensaje=msg,
-        en_curso=True,
+        en_curso=True if keep_lot else was_en_curso,
         ciclo_error=code,
+        tiempo_corriendo_s=freeze_s,
     )
     if _MACHINE_STATE.get("ciclo_en_curso") or _cycle_thread_alive():
         try:
             _prod_log_error(code, msg)
         except Exception:
             pass
-    if _cycle_thread_alive():
-        _cycle_motion_halt_for_error()
-        if _OVERLAP.get("on"):
-            _OVERLAP["feed_error"] = True
+    _cycle_motion_halt_for_error()
+    if _OVERLAP.get("on"):
+        _OVERLAP["feed_error"] = True
     if _prefeeder_required() and (
-        _MACHINE_STATE.get("ciclo_en_curso") or _MACHINE_STATE.get("estado") == "running"
+        _MACHINE_STATE.get("ciclo_en_curso")
+        or _MACHINE_STATE.get("estado") in ("running", "error")
     ):
         _prefeeder_process_halt_async()
 
@@ -3066,7 +3249,8 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         _set_machine_ui(feed=feed)
         global _PIECE_BLOWER_MM, _PIECE_FEED
-        _PIECE_BLOWER_MM = _feed_dict_length_mm(feed)
+        prog = _target_length_mm()
+        _PIECE_BLOWER_MM = prog if prog > 0 else _feed_dict_length_mm(feed)
         _PIECE_FEED = {"R": feed.get("R"), "L": feed.get("L")}
         return _cycle_after_feed_encoder_reset(params)
 
@@ -3186,6 +3370,10 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
             return False
         blower_ms = _cycle_blower_duration_ms(params)
+        _push_event(
+            f"Blower ON {blower_ms} ms "
+            f"(longitud programada {_cycle_blower_length_mm():.1f} mm)."
+        )
         if not _plc_cmd_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
             _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
             return False
@@ -3290,8 +3478,11 @@ def _plc_accepted(sent: dict, op: str) -> bool:
 
 def _overlap_start_holder(params: dict) -> None:
     gen = int(_OVERLAP["gen"])
+    worker_gen = getattr(_CYCLE_WORKER_TLS, "gen", None)
 
     def run() -> None:
+        if worker_gen is not None:
+            _CYCLE_WORKER_TLS.gen = worker_gen
         if _OVERLAP["gen"] != gen or _cycle_should_abort():
             return
         t_holder = time.perf_counter()
@@ -3441,7 +3632,8 @@ def _overlap_accept_feed(replies) -> bool:
         return False
     _OVERLAP["feed_done"] = True
     _OVERLAP["feed"] = feed
-    _OVERLAP["blower_mm"] = _feed_dict_length_mm(feed)
+    prog = _target_length_mm()
+    _OVERLAP["blower_mm"] = prog if prog > 0 else _feed_dict_length_mm(feed)
     _set_machine_ui(feed=feed, paralelo_id="")
     nxt = int(_LOT["cycles_done"]) + 2
     total = int(_LOT["cycles_total"])
@@ -3557,10 +3749,13 @@ def _overlap_start_feed_task() -> None:
         return
     _OVERLAP["feed_task_started"] = True
     gen = int(_OVERLAP["gen"])
+    worker_gen = getattr(_CYCLE_WORKER_TLS, "gen", None)
 
     def run() -> None:
+        if worker_gen is not None:
+            _CYCLE_WORKER_TLS.gen = worker_gen
         try:
-            if _OVERLAP["gen"] != gen or _cycle_should_stop():
+            if _OVERLAP["gen"] != gen or _cycle_should_abort():
                 return
             _overlap_send_feed_blocking()
         finally:
@@ -3646,11 +3841,21 @@ def _overlap_handoff() -> tuple[int, float | None]:
 
 
 def _finish_piece_idle(mensaje: str) -> None:
-    global _LAST_PIECE_S
+    global _LAST_PIECE_S, _PIECE_TICK0, _LOT_T0
+    lot_elapsed = 0.0
+    if _LOT_T0 is not None:
+        lot_elapsed = max(0.0, time.time() - _LOT_T0)
+    elif _LAST_PIECE_S:
+        lot_elapsed = float(_LAST_PIECE_S)
+    total_c = int(_LOT.get("cycles_total") or 0)
+    done_c = int(_LOT.get("cycles_done") or 0)
+    lot_done = total_c > 0 and done_c >= total_c
     _LOT["active"] = False
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
     _CYCLE_CTRL["step_mode"] = False
+    _PIECE_TICK0 = None
+    _LOT_T0 = None
     _set_machine_ui(
         estado="idle",
         estado_label="En espera",
@@ -3658,12 +3863,14 @@ def _finish_piece_idle(mensaje: str) -> None:
         en_curso=False,
         ciclo_error="",
         step_id="",
-        step_index=len(CYCLE_STEPS),
-        progreso_pct=100,
+        step_index=len(CYCLE_STEPS) if lot_done else 0,
+        progreso_pct=100 if lot_done else _lot_progress_pct(0),
         tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
-        tiempo_corriendo_s=0,
+        tiempo_corriendo_s=round(lot_elapsed, 1) if lot_done else 0,
         paralelo_id="",
     )
+    with _STATE_LOCK:
+        _MACHINE_STATE["tiempo_estimado_s"] = 0 if lot_done else None
     _overlap_reset()
     _cycle_latch_reset()
     _prefeeder_lock_after_cycle_async()
@@ -3671,6 +3878,9 @@ def _finish_piece_idle(mensaje: str) -> None:
 
 def _enter_tray_wait(deposits: int) -> None:
     _LOT["tray_wait"] = True
+    lot_elapsed = 0.0
+    if _LOT_T0 is not None:
+        lot_elapsed = max(0.0, time.time() - _LOT_T0)
     _set_machine_ui(
         estado="paused",
         estado_label="Charola llena",
@@ -3678,9 +3888,9 @@ def _enter_tray_wait(deposits: int) -> None:
         en_curso=True,
         step_id="",
         step_index=0,
-        progreso_pct=100,
+        progreso_pct=_lot_progress_pct(0),
         tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
-        tiempo_corriendo_s=0,
+        tiempo_corriendo_s=round(lot_elapsed, 1),
         paralelo_id="",
     )
     _push_event(f"Charola llena — {deposits} ciclos.", "warn")
@@ -3725,13 +3935,14 @@ def _piece_log_name() -> str:
 
 
 def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
-    global _LAST_PIECE_S, _PREV_PIECE_END_T, _PROD_CTX
+    global _LAST_PIECE_S, _PREV_PIECE_END_T, _PROD_CTX, _PIECE_TICK0
     params = _load_cycle_params()
     regime = bool(started_at is not None and start_index > 0 and _PREV_PIECE_END_T is not None)
     if regime:
         tick0 = _PREV_PIECE_END_T
     else:
         tick0 = time.time()
+    _PIECE_TICK0 = tick0
     fresh = start_index <= 0 and not regime
     piece_num = int(_LOT["cycles_done"]) + 1 if _LOT.get("active") else 1
     name = _piece_log_name()
@@ -3805,6 +4016,9 @@ def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
                     msg = "Ciclo en pausa. Reanudar para continuar."
                     label = "Pausa"
                     event = "Pausa — paso actual completado."
+                pause_elapsed = (
+                    round(time.time() - tick0, 1) if tick0 else round(elapsed, 1)
+                )
                 _set_machine_ui(
                     estado="paused",
                     estado_label=label,
@@ -3812,6 +4026,7 @@ def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
                     en_curso=True,
                     step_id=next_step,
                     step_index=next_idx,
+                    tiempo_corriendo_s=pause_elapsed,
                 )
                 _push_event(event, "warn")
                 _prefeeder_process_halt_async()
@@ -3837,26 +4052,34 @@ def _run_one_piece(start_index: int, started_at: float | None = None) -> bool:
     return True
 
 
-def _cycle_worker(start_index: int = 0) -> None:
+def _cycle_worker(start_index: int = 0, gen: int = 0) -> None:
+    _CYCLE_WORKER_TLS.gen = int(gen)
     lot_mode = bool(_LOT["active"])
     index = start_index
     started_at = None
     try:
         while True:
+            if not _cycle_worker_is_current(gen) or _cycle_should_abort():
+                return
             if _LOT["home_before"] and not _home_after_tray():
                 return
             if not _run_one_piece(index, started_at):
                 return
             _mant_add_cycle()
             if not lot_mode:
-                _finish_piece_idle("Ciclo completado. Listo para siguiente Start.")
+                if _cycle_worker_is_current(gen):
+                    _finish_piece_idle("Ciclo completado. Listo para siguiente Start.")
                 return
-            if _cycle_should_abort() or not _LOT["active"]:
+            if not _cycle_worker_is_current(gen) or _cycle_should_abort() or not _LOT["active"]:
                 return
             _LOT["cycles_done"] += 1
             done = _LOT["cycles_done"]
             total = _LOT["cycles_total"]
             deposits = int(_LOT["deposits_per_tray"] or 0)
+            _set_machine_ui(
+                progreso_pct=_lot_progress_pct(0),
+                tiempo_ciclo_s=round(_LAST_PIECE_S, 1),
+            )
             if done >= total:
                 avg_cadence = (
                     sum(_PROD_CADENCE_SAMPLES) / len(_PROD_CADENCE_SAMPLES)
@@ -3877,6 +4100,8 @@ def _cycle_worker(start_index: int = 0) -> None:
             _cycle_latch_reset()
             if not _overlap_wait_feed_done():
                 return
+            if not _cycle_worker_is_current(gen) or _cycle_should_abort():
+                return
             index, started_at = _overlap_handoff()
             if index == 0:
                 _set_machine_ui(
@@ -3892,29 +4117,39 @@ def _cycle_worker(start_index: int = 0) -> None:
                     paralelo_id="",
                 )
     except Exception as exc:
-        _cycle_motion_halt_for_error()
-        if not _cycle_error_active():
-            _cycle_fail(
-                "E000",
-                mensaje=f"Ciclo abortado por excepción interna: {exc}",
-            )
+        if _cycle_worker_is_current(gen):
+            _cycle_motion_halt_for_error()
+            if not _cycle_error_active():
+                _cycle_fail(
+                    "E000",
+                    mensaje=f"Ciclo abortado por excepción interna: {exc}",
+                )
     finally:
-        stop_req = _cycle_should_stop()
-        _CYCLE_CTRL["pause_after_step"].clear()
-        _CYCLE_CTRL["stop"].clear()
-        _CYCLE_CTRL["thread"] = None
+        # Solo el worker oficial limpia stop/lote. Cualquier hilo se quita de
+        # thread si es el registrado; un huerfano no toca el control del nuevo.
+        with _CYCLE_SPAWN_LOCK:
+            is_self = _CYCLE_CTRL.get("thread") is threading.current_thread()
+            is_owner = _cycle_worker_is_current(gen) and is_self
+            if is_self:
+                _CYCLE_CTRL["thread"] = None
+                _CYCLE_CTRL["pause_after_step"].clear()
+            if not is_owner:
+                return
+            stop_req = _CYCLE_CTRL["stop"].is_set()
+            if stop_req:
+                _CYCLE_CTRL["stop"].clear()
+                _CYCLE_CTRL["step_mode"] = False
         if stop_req:
-            _CYCLE_CTRL["step_mode"] = False
             _cycle_stop_idle()
         else:
-            # Si el hilo murió sin Stop ni error latched, no dejar «en proceso» fantasma.
+            # Pausa o error: el lote permanece. Si murio en running sin error, latch E043.
             with _STATE_LOCK:
                 stuck_running = (
-                    bool(_MACHINE_STATE.get("ciclo_en_curso"))
+                    bool(_MACHINE_STATE.get("ciclo_en_curso") or _LOT.get("active"))
                     and _MACHINE_STATE.get("estado") == "running"
                     and not str(_MACHINE_STATE.get("ciclo_error") or "").strip()
                 )
-            if stuck_running:
+            if stuck_running and _cycle_worker_is_current(gen):
                 _cycle_fail(
                     "E043",
                     mensaje="Ciclo detenido sin respuesta del Motion. Revisa COM o el firmware.",
@@ -3924,6 +4159,8 @@ def _cycle_worker(start_index: int = 0) -> None:
 def _cycle_blocked_by_routine() -> str:
     if not _checklist_bypassed() and not (_MACHINE_STATE.get("checklist") or {}).get("ok"):
         return "Completa la revisión de arranque antes de Iniciar."
+    if _MACHINE_STATE.get("post_error_purga"):
+        return "Tras un error: Reset y completa la purga antes de Iniciar o Reanudar."
     if _MACHINE_STATE.get("rutina") == "purga":
         return "Hay una purga en curso."
     return _motion_owner_busy()
@@ -3935,8 +4172,6 @@ def _cycle_start(*, step_mode: bool = False) -> tuple[bool, str]:
         return False, blocked
     if _LOT["tray_wait"]:
         return False, "La charola está llena. Vacía y confirma, o pulsa Stop."
-    if _LOT["active"]:
-        return False, "Hay un lote en curso. Reanuda o pulsa Stop."
     if not _MOTION_DATA.get("modelo_id") or _MOTION_DATA.get("target_length_mm") is None:
         return False, "Selecciona un modelo con longitud antes de Start."
     length = _target_length_mm()
@@ -3971,59 +4206,74 @@ def _cycle_start(*, step_mode: bool = False) -> tuple[bool, str]:
             return False, error_codes.format_message("E099")
     if not step_mode:
         _announce_trays(cycles, plan)
-    global _LOT_SEQ, _PROD_CADENCE_SAMPLES
-    _LOT_SEQ += 1
-    _PROD_CADENCE_SAMPLES = []
-    _LOT["active"] = True
-    _LOT["log_id"] = _LOT_SEQ
-    _LOT["tray_wait"] = False
-    _LOT["home_before"] = False
-    _LOT["cycles_total"] = cycles
-    _LOT["cycles_done"] = 0
-    _LOT["stacks"] = plan["stacks"]
-    _LOT["deposits_per_tray"] = plan["deposits"]
-    _LOT["batch_size"] = plan["batch_size"]
-    _LOT["cut_mm"] = plan["cut_mm"]
-    _LOT["length_mm"] = plan["length_mm"]
-    _LOT["gap_mm"] = plan["gap_mm"]
-    _LOT["clearance_mm"] = plan["clearance_mm"]
-    _LOT["sides"] = sides
-    _CYCLE_CTRL["stop"].clear()
-    _CYCLE_CTRL["step_mode"] = bool(step_mode)
-    if step_mode:
-        _CYCLE_CTRL["pause_after_step"].set()
-    else:
-        _CYCLE_CTRL["pause_after_step"].clear()
-    _overlap_reset()
-    _cycle_latch_reset()
-    global _PREV_PIECE_END_T
-    _PREV_PIECE_END_T = None
-    if step_mode:
-        ui_estado = "running"
-        ui_label = "Paso a paso"
-        ui_msg = "Prueba paso a paso — ejecutando paso 1."
-        event_msg = "Prueba paso a paso iniciada."
-    else:
-        ui_estado = "running"
-        ui_label = "Ciclo en marcha"
-        ui_msg = "Secuencia automática iniciada."
-        event_msg = None
-    _set_machine_ui(
-        estado=ui_estado,
-        estado_label=ui_label,
-        mensaje=ui_msg,
-        en_curso=True,
-        ciclo_error="",
-        feed={"R": None, "L": None},
-        step_id="1",
-        step_index=0,
-        progreso_pct=0,
-        tiempo_ciclo_s=None,
-        tiempo_corriendo_s=0,
-    )
-    th = threading.Thread(target=_cycle_worker, args=(0,), daemon=True)
-    _CYCLE_CTRL["thread"] = th
-    th.start()
+    global _LOT_SEQ, _PROD_CADENCE_SAMPLES, _PREV_PIECE_END_T, _PIECE_TICK0, _LOT_T0
+    with _CYCLE_SPAWN_LOCK:
+        if _cycle_thread_alive():
+            return False, "Hay un ciclo en ejecución."
+        if _LOT["active"]:
+            return False, "Hay un lote en curso. Reanuda o pulsa Stop."
+        _LOT_SEQ += 1
+        _PROD_CADENCE_SAMPLES = []
+        _LOT["active"] = True
+        _LOT["log_id"] = _LOT_SEQ
+        _LOT["tray_wait"] = False
+        _LOT["home_before"] = False
+        _LOT["cycles_total"] = cycles
+        _LOT["cycles_done"] = 0
+        _LOT["stacks"] = plan["stacks"]
+        _LOT["deposits_per_tray"] = plan["deposits"]
+        _LOT["batch_size"] = plan["batch_size"]
+        _LOT["cut_mm"] = plan["cut_mm"]
+        _LOT["length_mm"] = plan["length_mm"]
+        _LOT["gap_mm"] = plan["gap_mm"]
+        _LOT["clearance_mm"] = plan["clearance_mm"]
+        _LOT["sides"] = sides
+        _CYCLE_CTRL["stop"].clear()
+        _CYCLE_CTRL["step_mode"] = bool(step_mode)
+        if step_mode:
+            _CYCLE_CTRL["pause_after_step"].set()
+        else:
+            _CYCLE_CTRL["pause_after_step"].clear()
+        _overlap_reset()
+        _cycle_latch_reset()
+        _PREV_PIECE_END_T = None
+        _LOT_T0 = time.time()
+        _PIECE_TICK0 = _LOT_T0
+        if step_mode:
+            ui_estado = "running"
+            ui_label = "Paso a paso"
+            ui_msg = "Prueba paso a paso — ejecutando paso 1."
+            event_msg = "Prueba paso a paso iniciada."
+        else:
+            ui_estado = "running"
+            ui_label = "Ciclo en marcha"
+            ui_msg = "Secuencia automática iniciada."
+            event_msg = None
+        est0 = None
+        avg0 = _lot_avg_cycle_s()
+        if avg0 is not None and cycles > 0:
+            est0 = round(cycles * avg0, 1)
+        _set_machine_ui(
+            estado=ui_estado,
+            estado_label=ui_label,
+            mensaje=ui_msg,
+            en_curso=True,
+            ciclo_error="",
+            feed={"R": None, "L": None},
+            step_id="1",
+            step_index=0,
+            progreso_pct=0,
+            tiempo_ciclo_s=None,
+            tiempo_corriendo_s=0,
+        )
+        with _STATE_LOCK:
+            _MACHINE_STATE["tiempo_estimado_s"] = est0
+        ok, err = _cycle_spawn_worker(0, locked=True)
+        if not ok:
+            _LOT["active"] = False
+            _PIECE_TICK0 = None
+            _LOT_T0 = None
+            return False, err
     _prefeeder_unlock_for_cycle()
     if event_msg:
         _push_event(event_msg)
@@ -4051,28 +4301,45 @@ def _cycle_resume() -> tuple[bool, str]:
         return False, "La charola está llena. Vacía y confirma."
     if _MACHINE_STATE.get("ciclo_error"):
         return False, "Hay un error activo. Usa Reset cuando la condición se haya corregido."
+    if _MACHINE_STATE.get("post_error_purga"):
+        return False, "Tras un error debes completar la purga antes de Reanudar."
     if _MACHINE_STATE.get("rutina") == "purga":
         return False, "Hay una purga en curso."
     busy = _motion_owner_busy()
     if busy:
         return False, busy
     idx = int(_MACHINE_STATE.get("ciclo_paso_indice") or 0)
-    if idx <= 0 and not _MACHINE_STATE.get("ciclo_en_curso"):
+    lot_open = bool(_LOT["active"])
+    en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+    # Pausa/error no borran el lote: si sigue activo, reanudar desde el paso guardado.
+    if not lot_open and idx <= 0 and not en_curso:
         return _cycle_start()
+    if lot_open and not en_curso:
+        # Defensa: el lote sigue, aunque el flag en_curso se haya perdido.
+        en_curso = True
     ready, link_err = _links_ready_for_cycle()
     if not ready:
         return False, link_err
     if idx >= len(CYCLE_STEPS):
         idx = len(CYCLE_STEPS) - 1
+    if idx < 0:
+        idx = 0
     step_mode = bool(_CYCLE_CTRL.get("step_mode"))
-    _CYCLE_CTRL["stop"].clear()
-    if step_mode:
-        _CYCLE_CTRL["pause_after_step"].set()
-    else:
-        _CYCLE_CTRL["pause_after_step"].clear()
-    th = threading.Thread(target=_cycle_worker, args=(idx,), daemon=True)
-    _CYCLE_CTRL["thread"] = th
-    th.start()
+    global _PIECE_TICK0
+    frozen = float(_MACHINE_STATE.get("tiempo_corriendo_s") or 0)
+    with _CYCLE_SPAWN_LOCK:
+        if _cycle_thread_alive():
+            return False, "Hay un ciclo en ejecución."
+        _CYCLE_CTRL["stop"].clear()
+        if step_mode:
+            _CYCLE_CTRL["pause_after_step"].set()
+        else:
+            _CYCLE_CTRL["pause_after_step"].clear()
+        # Reanudar el reloj de pieza desde el valor congelado en pausa/error.
+        _PIECE_TICK0 = time.time() - max(0.0, frozen)
+        ok, err = _cycle_spawn_worker(idx, locked=True)
+        if not ok:
+            return False, err
     _prefeeder_unlock_for_cycle()
     if step_mode:
         step = CYCLE_STEPS[idx] if 0 <= idx < len(CYCLE_STEPS) else None
@@ -4082,10 +4349,16 @@ def _cycle_resume() -> tuple[bool, str]:
             estado="running",
             estado_label="Paso a paso",
             mensaje=f"Ejecutando paso {sid}" + (f" — {label}." if label else "."),
+            en_curso=True,
         )
         _push_event(f"Paso a paso — ejecutando paso {sid}.")
     else:
-        _set_machine_ui(estado="running", estado_label="Ciclo en marcha", mensaje="Reanudando secuencia.")
+        _set_machine_ui(
+            estado="running",
+            estado_label="Ciclo en marcha",
+            mensaje="Reanudando secuencia.",
+            en_curso=True,
+        )
         _push_event("Ciclo reanudado.")
     return True, ""
 
@@ -4126,33 +4399,45 @@ def _charola_vacia(_data=None) -> tuple[bool, str]:
     ready, link_err = _links_ready_for_cycle()
     if not ready:
         return False, link_err
-    _LOT["tray_wait"] = False
-    _LOT["home_before"] = True
-    _CYCLE_CTRL["stop"].clear()
-    _CYCLE_CTRL["pause_after_step"].clear()
-    _cycle_latch_reset()
-    _set_machine_ui(
-        estado="running",
-        estado_label="Ciclo en marcha",
-        mensaje="Charola vacía. Regresando el eje a cero.",
-        en_curso=True,
-    )
-    th = threading.Thread(target=_cycle_worker, args=(0,), daemon=True)
-    _CYCLE_CTRL["thread"] = th
-    th.start()
+    with _CYCLE_SPAWN_LOCK:
+        if _cycle_thread_alive():
+            return False, "Hay un ciclo en ejecución."
+        _LOT["tray_wait"] = False
+        _LOT["home_before"] = True
+        _CYCLE_CTRL["stop"].clear()
+        _CYCLE_CTRL["pause_after_step"].clear()
+        _cycle_latch_reset()
+        _set_machine_ui(
+            estado="running",
+            estado_label="Ciclo en marcha",
+            mensaje="Charola vacía. Regresando el eje a cero.",
+            en_curso=True,
+        )
+        ok, err = _cycle_spawn_worker(0, locked=True)
+        if not ok:
+            _LOT["tray_wait"] = True
+            _LOT["home_before"] = False
+            return False, err
     _prefeeder_unlock_for_cycle()
     return True, "Charola vacía. El eje vuelve a cero y el siguiente corte sale del primer montón."
 
 
 def _cycle_stop_idle(mensaje: str = "Stop — ciclo detenido. Listo para Iniciar.") -> None:
-    global _STEP4_CLOSES
+    """Solo Stop (o el finally del hilo tras Stop) debe llegar aquí y borrar el lote."""
+    global _STEP4_CLOSES, _PIECE_TICK0, _LOT_T0
     _STEP4_CLOSES = False
     _LOT["active"] = False
     _LOT["tray_wait"] = False
     _LOT["home_before"] = False
+    _LOT["cycles_done"] = 0
+    _LOT["cycles_total"] = 0
     _CYCLE_CTRL["step_mode"] = False
+    _PIECE_TICK0 = None
+    _LOT_T0 = None
     _overlap_reset()
     _cycle_latch_reset()
+    with _STATE_LOCK:
+        _MACHINE_STATE["post_error_purga"] = False
     _set_machine_ui(
         estado="idle",
         estado_label="En espera",
@@ -4166,16 +4451,20 @@ def _cycle_stop_idle(mensaje: str = "Stop — ciclo detenido. Listo para Iniciar
         paralelo_id="",
         feed={"R": None, "L": None},
     )
+    with _STATE_LOCK:
+        _MACHINE_STATE["tiempo_estimado_s"] = None
 
 
 def _cycle_stop() -> None:
-    running = bool(_CYCLE_CTRL["thread"] and _CYCLE_CTRL["thread"].is_alive())
-    _LOT["active"] = False
-    _LOT["tray_wait"] = False
-    _LOT["home_before"] = False
-    _CYCLE_CTRL["stop"].set()
-    _CYCLE_CTRL["pause_after_step"].clear()
-    _CYCLE_CTRL["step_mode"] = False
+    """Única acción de operador que cancela el lote en curso."""
+    with _CYCLE_SPAWN_LOCK:
+        th = _CYCLE_CTRL.get("thread")
+        running = th is not None and th.is_alive()
+        # Invalida workers oficiales y huerfanos: gen cambia → abort inmediato.
+        _CYCLE_CTRL["gen"] = int(_CYCLE_CTRL.get("gen") or 0) + 1
+        _CYCLE_CTRL["stop"].set()
+        _CYCLE_CTRL["pause_after_step"].clear()
+        _CYCLE_CTRL["step_mode"] = False
     _ROUTINE["stop"].set()
     if _serial_port("motion"):
         _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
@@ -4189,12 +4478,13 @@ def _cycle_stop() -> None:
     if _prefeeder_required():
         _prefeeder_stop_now()
     _push_event("Stop — ciclo abortado.", "warn")
-    if running:
-        th = _CYCLE_CTRL.get("thread")
-        if th is not None:
-            th.join(timeout=2.0)
-    else:
-        _CYCLE_CTRL["stop"].clear()
+    if running and th is not None:
+        th.join(timeout=2.0)
+    with _CYCLE_SPAWN_LOCK:
+        if not _cycle_thread_alive():
+            _CYCLE_CTRL["stop"].clear()
+            if _CYCLE_CTRL.get("thread") is th:
+                _CYCLE_CTRL["thread"] = None
 
 
 def _error_physical_clear_now() -> bool:
@@ -4249,17 +4539,35 @@ def _cycle_reset_error() -> tuple[bool, str]:
         if not sent.get("sent"):
             return False, error_codes.format_message(sent.get("code") or "E019")
         _plc_wait_ready(1.5)
+
+    def _finish_reset_to_purge(keep: bool) -> tuple[bool, str]:
+        # Ruta especial: tras Reset la purga es obligatoria antes de Reanudar/Start.
+        with _STATE_LOCK:
+            _MACHINE_STATE["post_error_purga"] = True
+        msg = (
+            "Error limpiado. Completa la purga para reanudar."
+            if keep
+            else "Error limpiado. Completa la purga para operar."
+        )
+        _set_machine_ui(
+            estado="paused" if keep else "idle",
+            estado_label="Purga pendiente",
+            ciclo_error="",
+            mensaje=msg,
+            en_curso=keep,
+        )
+        _push_event("Reset — PLC fallos borrados; completa la purga.")
+        return True, ""
+
     if not code and _MACHINE_STATE.get("estado") == "error":
         _pf_last_fault_sig = ()
         _PF_ERROR_LATCH = False
-        _set_machine_ui(
-            estado="idle",
-            estado_label="En espera",
-            ciclo_error="",
-            mensaje="Sistema listo. Sin errores activos.",
+        keep = bool(
+            _MACHINE_STATE.get("ciclo_en_curso")
+            or _LOT.get("active")
+            or _LOT.get("tray_wait")
         )
-        _push_event("Reset — PLC fallos borrados.")
-        return True, ""
+        return _finish_reset_to_purge(keep)
     if not _wait_error_physical_clear_stable():
         return False, _error_reset_blocked_message()
     if _prefeeder_required():
@@ -4272,17 +4580,11 @@ def _cycle_reset_error() -> tuple[bool, str]:
     st = _PF_CACHED_STATUS
     _pf_last_fault_sig = _prefeeder_fault_sig(st) if st else ()
     _PF_ERROR_LATCH = False
-    en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
-    _set_machine_ui(
-        ciclo_error="",
-        estado="paused" if en_curso else "idle",
-        estado_label="Pausa" if en_curso else "En espera",
-        mensaje="Error limpiado. Reanudar para continuar."
-        if en_curso
-        else "Sistema listo. Sin errores activos.",
+    # El lote solo lo borra Stop: tras un error se queda para Reanudar (después de purga).
+    en_curso = bool(
+        _MACHINE_STATE.get("ciclo_en_curso") or _LOT.get("active") or _LOT.get("tray_wait")
     )
-    _push_event("Reset — PLC fallos borrados; listo para reanudar." if en_curso else "Reset — PLC fallos borrados.")
-    return True, ""
+    return _finish_reset_to_purge(en_curso)
 
 
 # ── Vías especiales (rutinas de operador) ───────────────────────────────────
@@ -4414,7 +4716,7 @@ def _rearm_piece(mensaje: str) -> None:
         ciclo_error="",
         step_id="1",
         step_index=0,
-        progreso_pct=0,
+        progreso_pct=_lot_progress_pct(0) if int(_LOT.get("cycles_total") or 0) > 0 else 0,
     )
 
 
@@ -4636,14 +4938,46 @@ def _purga_finish(cancelled: bool) -> None:
         _MACHINE_STATE["rutina_manos"] = False
         from_lote = bool(_ROUTINE.get("from_lote"))
         _ROUTINE["from_lote"] = False
+        recovery = bool(_MACHINE_STATE.get("post_error_purga"))
+        keep = bool(
+            _MACHINE_STATE.get("ciclo_en_curso")
+            or _LOT.get("active")
+            or _LOT.get("tray_wait")
+        )
     if cancelled:
         _push_event("Purga cancelada.", "warn")
         msg = "Purga cancelada."
+        if recovery:
+            _set_machine_ui(
+                estado="paused" if keep else "idle",
+                estado_label="Purga pendiente",
+                mensaje="Purga cancelada. Completa la purga para continuar.",
+                en_curso=keep,
+            )
+            return
     else:
         if paso == 5:
             _checklist_update(purga_ok=True)
         _push_event("Purga terminada.")
         msg = "Purga terminada."
+        if recovery:
+            with _STATE_LOCK:
+                _MACHINE_STATE["post_error_purga"] = False
+            if keep:
+                _set_machine_ui(
+                    estado="paused",
+                    estado_label="Pausa",
+                    mensaje="Purga terminada. Reanudar para continuar desde el punto pausado.",
+                    en_curso=True,
+                )
+            else:
+                _set_machine_ui(
+                    estado="idle",
+                    estado_label="En espera",
+                    mensaje="Purga terminada. Listo para operar.",
+                    en_curso=False,
+                )
+            return
     if from_lote:
         _rearm_piece(msg + " El ciclo queda en pausa y la pieza vuelve al paso 1.")
         return
@@ -4681,12 +5015,16 @@ def _purga_prepare() -> None:
 def _purga_start(_data=None) -> tuple[bool, str]:
     if _MACHINE_STATE.get("rutina") == "purga":
         return False, "Ya hay una purga en curso."
+    if _MACHINE_STATE.get("estado") == "error" or _MACHINE_STATE.get("ciclo_error"):
+        return False, "Limpia el error con Reset antes de la purga."
     if _MACHINE_STATE.get("estado") == "running":
         return False, "Pausa o detén el ciclo antes de la purga."
     ready, err = _require_links()
     if not ready:
         return False, err
-    _ROUTINE["from_lote"] = bool(_MACHINE_STATE.get("ciclo_en_curso"))
+    # En ruta post-error se conserva el paso pausado; no rearmar a paso 1 al terminar.
+    recovery = bool(_MACHINE_STATE.get("post_error_purga"))
+    _ROUTINE["from_lote"] = bool(_MACHINE_STATE.get("ciclo_en_curso")) and not recovery
     _set_routine_ui(rutina="purga", rutina_fase="segura", rutina_manos=False, estado_label="Purga")
     ok, err = _start_routine(_purga_prepare)
     if not ok:
