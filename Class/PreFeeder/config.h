@@ -52,6 +52,12 @@ constexpr uint8_t PIN_HOLGURA = 22;       // HIGH = holgura OK (ON)
 constexpr uint8_t HOLGURA_ON_LEVEL = HIGH;
 constexpr uint8_t PIN_SERVO = 26;
 
+// Botón físico JOG - L / JOG - R (según PF_SIDE_TAG). Activo en LOW.
+// Solo cambia este número de GPIO para cablear otro pin.
+constexpr uint8_t PIN_JOG = 33;
+constexpr uint8_t JOG_ACTIVE_LEVEL = LOW;
+constexpr uint32_t JOG_STABLE_MS = 20;
+
 constexpr uint16_t SERVO_MIN_US = 500;
 constexpr uint16_t SERVO_MAX_US = 2500;
 constexpr uint16_t SERVO_NEUTRAL_US = 1500;

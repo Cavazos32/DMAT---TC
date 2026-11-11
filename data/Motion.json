@@ -1,12 +1,12 @@
 {
   "feeder": {
     "R": {
-      "profile_velocity_pps": 1964,
+      "profile_velocity_pps": 3273,
       "target_position_counts": 42500,
       "compensation_mm": 0.0
     },
     "L": {
-      "profile_velocity_pps": 1964,
+      "profile_velocity_pps": 3273,
       "target_position_counts": 42500,
       "compensation_mm": 0.0
     }

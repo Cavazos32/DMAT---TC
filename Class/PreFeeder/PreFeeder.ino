@@ -37,7 +37,8 @@ static SemaphoreHandle_t paramMux = nullptr;
 static bool gFeedLock = true;
 static bool gOmitHolgura = false;
 static volatile bool gCfgPollUrgent = false;
-static bool gForceFeed = false;
+static bool gForceFeed = false;  // HMI / maestro (set_force_feed)
+static bool gJogBtn = false;     // Botón físico JOG - L / JOG - R
 
 static FeedParams paramsNow() {
   FeedParams p = gFeed;
@@ -204,9 +205,14 @@ static void stopFeederDemand() {
   resetHolguraFeedState();
 }
 
+// HMI (gForceFeed) y botón físico (gJogBtn) son OR: soltar uno no corta si el otro sigue activo.
+static bool forceFeedActive() {
+  return gForceFeed || gJogBtn;
+}
+
 static bool feedMayRun() {
   if (fault == FAULT_NONE) return true;
-  return gForceFeed && fault == FAULT_HOLGURA;
+  return forceFeedActive() && fault == FAULT_HOLGURA;
 }
 
 static void applyFeedOutputs(const FeedParams& p) {
@@ -315,16 +321,39 @@ static void FeedingMode(uint32_t nowMs) {
   const SensorSnapshot& s = SensorMonitor(nowMs);
   const FeedParams p = paramsNow();
 
+  // JOG físico: misma ruta que force_feed de la HMI (nivel, no flanco).
+  {
+    static bool jogReady = false;
+    static bool jogRawLast = false;
+    static uint32_t jogStableAt = 0;
+    if (!jogReady) {
+      pinMode(PIN_JOG, INPUT_PULLUP);
+      jogReady = true;
+      jogRawLast = digitalRead(PIN_JOG) == JOG_ACTIVE_LEVEL;
+      gJogBtn = jogRawLast;
+      jogStableAt = nowMs;
+    } else {
+      const bool raw = digitalRead(PIN_JOG) == JOG_ACTIVE_LEVEL;
+      if (raw != jogRawLast) {
+        jogRawLast = raw;
+        jogStableAt = nowMs;
+      } else if ((uint32_t)(nowMs - jogStableAt) >= JOG_STABLE_MS) {
+        gJogBtn = raw;
+      }
+    }
+  }
+
   if (fault == FAULT_CYLINDER && !s.cylinderOpen) fault = FAULT_NONE;
   if (fault == FAULT_HOSE && !s.hoseAbsent) fault = FAULT_NONE;
-  if (fault == FAULT_HOLGURA && s.holguraOn) fault = FAULT_NONE;
+  // Holgura se limpia con sensor ON o si el operador omitió la vigilancia.
+  if (fault == FAULT_HOLGURA && (s.holguraOn || gOmitHolgura)) fault = FAULT_NONE;
 
   if (fault == FAULT_NONE) {
     if (s.hoseAbsent) enterFault(FAULT_HOSE);
     if (s.cylinderOpen) enterFault(FAULT_CYLINDER);
   }
 
-  if (gForceFeed && feedMayRun()) {
+  if (forceFeedActive() && feedMayRun()) {
     holguraOffSinceMs = 0;
     holguraStallSinceMs = 0;
     feederDemand = true;
@@ -581,7 +610,8 @@ static void netTask(void*) {
 void setup() {
   Serial.begin(115200);
   delay(300);
-  Serial.printf("\nPF %s -> %s\n", PF_SIDE_TAG, PF_MASTER_HOST);
+  Serial.printf("\nPF %s -> %s | JOG - %s GPIO %u\n", PF_SIDE_TAG, PF_MASTER_HOST, PF_SIDE_TAG,
+                (unsigned)PIN_JOG);
   clampFeed(gFeed);
   paramMux = xSemaphoreCreateMutex();
   statusMux = xSemaphoreCreateMutex();

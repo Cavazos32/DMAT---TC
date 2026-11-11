@@ -145,10 +145,23 @@ static String slaveConfigJson(const SideLive& live) {
   return j;
 }
 
+static uint8_t sideReportedFault(const SideLive& s) {
+  if (s.omitHolgura && s.fault == FAULT_HOLGURA) return FAULT_NONE;
+  return s.fault;
+}
+
+static bool sideEffectiveIdle(const SideLive& s) {
+  // Holgura omitida: el esclavo puede reportar error/HOLGURA o quedar en
+  // error tras limpiar fault; para listo/estabilizado cuenta como idle.
+  if (s.omitHolgura && (s.fault == FAULT_HOLGURA || strcmp(s.state, "error") == 0))
+    return true;
+  return strcmp(s.state, "idle") == 0;
+}
+
 static bool masterStable(uint32_t now) {
   if (!sideOnline(liveL, now) || !sideOnline(liveR, now)) return false;
-  if (liveL.fault != FAULT_NONE || liveR.fault != FAULT_NONE) return false;
-  if (strcmp(liveL.state, "idle") != 0 || strcmp(liveR.state, "idle") != 0) return false;
+  if (sideReportedFault(liveL) != FAULT_NONE || sideReportedFault(liveR) != FAULT_NONE) return false;
+  if (!sideEffectiveIdle(liveL) || !sideEffectiveIdle(liveR)) return false;
   return true;
 }
 
@@ -166,15 +179,18 @@ static bool sideOnline(const SideLive& s, uint32_t now) {
 
 static void appendSide(String& j, const char* name, const SideLive& s, uint32_t now) {
   const bool on = sideOnline(s, now);
-  const SystemFault fault = (SystemFault)s.fault;
+  const uint8_t faultCode = sideReportedFault(s);
+  const SystemFault fault = (SystemFault)faultCode;
+  const char* stateOut = s.state;
+  if (s.omitHolgura && s.fault == FAULT_HOLGURA) stateOut = "idle";
   j += "\"";
   j += name;
   j += "\":{\"online\":";
   j += on ? "true" : "false";
   j += ",\"state\":\"";
-  j += s.state;
+  j += stateOut;
   j += "\",\"fault\":";
-  j += String(s.fault);
+  j += String(faultCode);
   j += ",\"error\":\"";
   j += pfFaultName(fault);
   j += "\",\"sensors\":{\"cylinder\":";
@@ -310,7 +326,7 @@ static void handleStatusPost() {
     server.send(404, "text/plain", "side");
     return;
   }
-  const uint8_t prevFault = live->fault;
+  const uint8_t prevReported = sideReportedFault(*live);
   float faultN = 0;
   if (jsonNum(body, "fault", faultN)) live->fault = (uint8_t)faultN;
   bool bit = false;
@@ -333,10 +349,21 @@ static void handleStatusPost() {
       live->state[sizeof(live->state) - 1] = 0;
     }
   }
+  // Con omit activo no se sostiene ni se reinyecta FAULT_HOLGURA.
+  // También hay que salir de "error": si solo se limpia fault, masterStable
+  // sigue viendo state=error y nunca marca stable/ready (E099 en el HMI).
+  if (live->omitHolgura && live->fault == FAULT_HOLGURA) {
+    live->fault = FAULT_NONE;
+    if (strcmp(live->state, "error") == 0) {
+      strncpy(live->state, "idle", sizeof(live->state) - 1);
+      live->state[sizeof(live->state) - 1] = 0;
+    }
+  }
   if (live->fault != FAULT_NONE) strncpy(live->state, "error", sizeof(live->state));
   live->lastMs = millis();
   live->seen = true;
-  if (live->fault != prevFault) emitPfFault(side, live->fault);
+  const uint8_t reported = sideReportedFault(*live);
+  if (reported != prevReported) emitPfFault(side, reported);
   server.send(200, "text/plain", "ok");
 }
 
@@ -387,6 +414,15 @@ static void replySetOmitSerial(const String& body) {
   }
   bool on = live->omitHolgura;
   if (jsonBool(body, "on", on)) live->omitHolgura = on;
+  // Omitir debe liberar la falla de holgura ya latcheada (si no, Reset queda bloqueado).
+  if (live->omitHolgura && live->fault == FAULT_HOLGURA) {
+    live->fault = FAULT_NONE;
+    if (strcmp(live->state, "error") == 0) {
+      strncpy(live->state, "idle", sizeof(live->state));
+      live->state[sizeof(live->state) - 1] = 0;
+    }
+    emitPfFault(side, FAULT_NONE);
+  }
   Serial.print(F("{\"op\":\"set_omit\",\"ok\":true,\"side\":\""));
   Serial.print(side);
   Serial.print(F("\",\"on\":"));

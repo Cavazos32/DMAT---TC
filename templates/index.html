@@ -41,6 +41,7 @@
       <div class="status-banner__actions" id="statusBannerActions" hidden>
         <button type="button" class="btn btn-manual" data-action="purga_alimentar">Alimentar</button>
         <button type="button" class="btn btn-manual" data-action="purga_limpiar">Limpiar</button>
+        <button type="button" class="btn btn-manual" data-plc-op="valve" data-plc-name="holder_encoder" data-plc-keep-label aria-pressed="false" title="Abrir o cerrar holder y encoder juntos">Holder + encoder</button>
         <button type="button" class="btn btn-start" data-action="charola_vacia" hidden>Charola vacía</button>
         <button type="button" class="btn btn-resume" data-action="purga_continuar">Continuar</button>
         <button type="button" class="btn btn-secondary" data-action="purga_terminar">Terminar</button>
@@ -132,8 +133,8 @@
           <h2 class="panel-title">PreAlimentador</h2>
           <div class="btn-grid">
             <button type="button" class="btn btn-feeder" data-action="iniciar">Iniciar</button>
-            <button type="button" class="btn btn-feeder" data-pf-hold="L" data-action="alimentar_izquierda">Alimentar izquierda</button>
-            <button type="button" class="btn btn-feeder" data-pf-hold="R" data-action="alimentar_derecha">Alimentar derecha</button>
+            <button type="button" class="btn btn-feeder" data-pf-hold="L" data-action="alimentar_izquierda">JOG - L</button>
+            <button type="button" class="btn btn-feeder" data-pf-hold="R" data-action="alimentar_derecha">JOG - R</button>
             <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_izquierda">Omitir holgura izquierda</button>
             <button type="button" class="btn btn-feeder btn-secondary" data-action="omitir_holgura_derecha">Omitir holgura derecha</button>
           </div>

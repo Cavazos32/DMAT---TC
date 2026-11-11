@@ -545,8 +545,27 @@
       return;
     }
     if (btn.hasAttribute("data-plc-op")) {
+      if (btn.hasAttribute("data-plc-keep-label")) return;
       btn.textContent = on ? "Encendido" : "Apagado";
     }
+  }
+
+  function plcHolderEncoderButton() {
+    return document.querySelector(
+      '#statusBannerActions [data-plc-name="holder_encoder"]'
+    );
+  }
+
+  function syncPlcHolderEncoderButton(status) {
+    const btn = plcHolderEncoderButton();
+    if (!btn || !status) return;
+    if (
+      typeof status.holder !== "boolean" ||
+      typeof status.encoder !== "boolean"
+    ) {
+      return;
+    }
+    setPlcPressed(btn, status.holder && status.encoder);
   }
 
   function syncProcessControls(state) {
@@ -1275,8 +1294,8 @@
       posicion_inicial: "Posición inicial",
       charola_vacia: "Charola vacía",
       iniciar: "Iniciar (PreAlimentador)",
-      alimentar_izquierda: "Alimentar izquierda",
-      alimentar_derecha: "Alimentar derecha",
+      alimentar_izquierda: "JOG - L",
+      alimentar_derecha: "JOG - R",
       omitir_holgura_izquierda: "Omitir holgura izquierda",
       omitir_holgura_derecha: "Omitir holgura derecha",
     };
@@ -1889,6 +1908,7 @@
     PLC_OUTPUTS.forEach(function (pair) {
       if (typeof status[pair[0]] === "boolean") setPlcPressed(plcButton(pair[1]), status[pair[0]]);
     });
+    syncPlcHolderEncoderButton(status);
   }
 
   function clearPlcOutputs() {
@@ -1899,6 +1919,7 @@
       ? els.plcManualForm.querySelector('[data-plc-op="blower"]')
       : null;
     setPlcPressed(blowerBtn, false);
+    setPlcPressed(plcHolderEncoderButton(), false);
   }
 
   async function sendPlcOp(op, extra) {
@@ -2143,6 +2164,14 @@
     });
   }
 
+  if (els.statusBannerActions) {
+    els.statusBannerActions.querySelectorAll("[data-plc-op]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        runPlcButton(btn);
+      });
+    });
+  }
+
   if (els.selectModelo) {
     els.selectModelo.addEventListener("change", function () {
       if (syncingModelSelect) return;
@@ -2246,12 +2275,14 @@
       const showPurge = purga && fase === "espera";
       const showTray = !!state.charola_llena;
       els.statusBannerActions.hidden = !(showPurge || showTray);
-      els.statusBannerActions.querySelectorAll("[data-action]").forEach(function (btn) {
-        const trayBtn = btn.dataset.action === "charola_vacia";
-        const show = trayBtn ? showTray : showPurge;
-        btn.hidden = !show;
-        btn.disabled = !show;
-      });
+      els.statusBannerActions
+        .querySelectorAll("[data-action], [data-plc-op]")
+        .forEach(function (btn) {
+          const trayBtn = btn.dataset.action === "charola_vacia";
+          const show = trayBtn ? showTray : showPurge;
+          btn.hidden = !show;
+          btn.disabled = !show;
+        });
     }
     renderChecklist(state);
     if (els.mantCounter) {

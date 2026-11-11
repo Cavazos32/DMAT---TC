@@ -121,6 +121,9 @@ _CYCLE_LATCH = {
     "cut_done": False,
     "discharge_done": False,
 }
+# Pinzas cerradas con pieza en proceso (paso 4 → antes de soltar en paso 7).
+# Ante error se retiene; no se re-cierra si ya estaban abiertas.
+_GRIPPER_HOLDING = False
 
 # Lote en curso. El batch (montón de la charola) se calcula al pulsar Start.
 _LOT = {
@@ -406,7 +409,8 @@ _MACHINE_STATE = {
     "rutina": "",
     "rutina_fase": "",
     "rutina_manos": False,
-    # Tras cualquier error: Reset → purga obligatoria → luego Reanudar/Start.
+    # Tras cualquier error: Reset → purga → Reanudar reintenta la pieza desde el paso 1
+    # (el lote y cycles_done se conservan; no se cuenta ni se descarta la pieza).
     "post_error_purga": False,
     "omitir_holgura_l": False,
     "omitir_holgura_r": False,
@@ -626,6 +630,41 @@ def _feed_sides_of(params: dict) -> str:
     if raw == "L":
         return "L"
     return "R"
+
+
+def _holgura_omit_effective(
+    sides: str | None = None,
+    *,
+    omit_l: bool | None = None,
+    omit_r: bool | None = None,
+) -> tuple[bool, bool]:
+    """Omit manual + auto: un solo lado activo omite holgura del contrario."""
+    if omit_l is None or omit_r is None:
+        with _STATE_LOCK:
+            if omit_l is None:
+                omit_l = bool(_MACHINE_STATE.get("omitir_holgura_l"))
+            if omit_r is None:
+                omit_r = bool(_MACHINE_STATE.get("omitir_holgura_r"))
+    raw = str(sides if sides is not None else _run_sides() or "R").strip().upper()
+    if raw == "L":
+        omit_r = True
+    elif raw == "R":
+        omit_l = True
+    return bool(omit_l), bool(omit_r)
+
+
+_PFEEDER_CODES_L = frozenset({"E093", "E094", "E095"})
+_PFEEDER_CODES_R = frozenset({"E096", "E097", "E098"})
+
+
+def _active_feed_sides(sides: str | None = None) -> tuple[str, ...]:
+    """Lados que cuentan para Motion/PreFeeder según feed_sides."""
+    raw = str(sides if sides is not None else _run_sides() or "R").strip().upper()
+    if raw == "LR":
+        return ("L", "R")
+    if raw == "L":
+        return ("L",)
+    return ("R",)
 
 
 def _parse_bool(value, default: bool = False) -> bool:
@@ -1640,11 +1679,54 @@ def _prefeeder_status_get() -> dict | None:
     return None
 
 
+def _prefeeder_fault_codes_active(
+    status: dict | None,
+    *,
+    omit_l: bool | None = None,
+    omit_r: bool | None = None,
+) -> list[str]:
+    """Fallas vigentes del PreAlimentador.
+
+    - Lado fuera de feed_sides: se ignora por completo (no espera ni bloquea).
+    - E095/E098 se ignoran si ese lado tiene holgura omitida (manual o auto).
+
+    omit_l/omit_r opcionales: si ya se leyeron bajo _STATE_LOCK, pasarlos para
+    no reentrar el candado (deadlock en /api/state con falla activa).
+    """
+    codes = error_codes.prefeeder_fault_codes(status)
+    if not codes:
+        return []
+    watched = set(_active_feed_sides())
+    omit_l, omit_r = _holgura_omit_effective(omit_l=omit_l, omit_r=omit_r)
+    out: list[str] = []
+    for code in codes:
+        if code in _PFEEDER_CODES_L and "L" not in watched:
+            continue
+        if code in _PFEEDER_CODES_R and "R" not in watched:
+            continue
+        if code == "E095" and omit_l:
+            continue
+        if code == "E098" and omit_r:
+            continue
+        out.append(code)
+    return out
+
+
+def _prefeeder_holgura_omitted_for_code(code: str) -> bool:
+    code = str(code or "").strip().upper()
+    omit_l, omit_r = _holgura_omit_effective()
+    if code == "E095":
+        return omit_l
+    if code == "E098":
+        return omit_r
+    return False
+
+
 def _prefeeder_active_errors(status: dict | None) -> list[dict]:
     if not status:
         return []
     items = []
-    for code in error_codes.prefeeder_fault_codes(status):
+    for code in _prefeeder_fault_codes_active(status):
         items.append({"code": code, "message": error_codes.format_message(code)})
     return items
 
@@ -1777,19 +1859,42 @@ def _prefeeder_set_omit(side: str, on: bool) -> bool:
 def _prefeeder_sync_omit_flags() -> None:
     if not _prefeeder_required():
         return
-    with _STATE_LOCK:
-        ol = bool(_MACHINE_STATE.get("omitir_holgura_l"))
-        or_ = bool(_MACHINE_STATE.get("omitir_holgura_r"))
+    ol, or_ = _holgura_omit_effective()
     _prefeeder_set_omit("L", ol)
     _prefeeder_set_omit("R", or_)
 
 
+def _prefeeder_side_idle_ok(block: dict | None, *, omit_holgura: bool) -> bool:
+    if not isinstance(block, dict) or not block.get("online"):
+        return False
+    try:
+        fault = int(block.get("fault") or 0)
+    except (TypeError, ValueError):
+        fault = 0
+    if fault == 6 and omit_holgura:
+        fault = 0
+    if fault:
+        return False
+    state = str(block.get("state") or "").strip().lower()
+    if omit_holgura and state == "error":
+        return True
+    return state == "idle"
+
+
 def _prefeeder_status_ready(status: dict | None) -> bool:
+    """Listo según lados de feed_sides (el maestro viejo exige L+R siempre)."""
     if not status:
         return False
-    if not status.get("ready"):
+    if not status.get("feed_lock"):
         return False
-    return not error_codes.prefeeder_fault_codes(status)
+    if _prefeeder_fault_codes_active(status):
+        return False
+    omit_l, omit_r = _holgura_omit_effective()
+    for side in _active_feed_sides():
+        omit = omit_l if side == "L" else omit_r
+        if not _prefeeder_side_idle_ok(status.get(side), omit_holgura=omit):
+            return False
+    return True
 
 
 def _prefeeder_stop_now() -> None:
@@ -1819,7 +1924,7 @@ def _prefeeder_comm_active() -> bool:
 
 
 def _prefeeder_fault_sig(st: dict | None) -> tuple[str, ...]:
-    return tuple(sorted(error_codes.prefeeder_fault_codes(st)))
+    return tuple(sorted(_prefeeder_fault_codes_active(st)))
 
 
 def _machine_fault_message(codes: tuple[str, ...]) -> tuple[str, str]:
@@ -1879,6 +1984,7 @@ def _prefeeder_drain_pf_fault_lines() -> None:
     global _PF_ERROR_LATCH
     if not _serial_port("prefeeder"):
         return
+    watched = set(_active_feed_sides())
     try:
         with _prefeeder_serial_lock:
             ser = _prefeeder_serial
@@ -1893,6 +1999,15 @@ def _prefeeder_drain_pf_fault_lines() -> None:
                 except (TypeError, json.JSONDecodeError):
                     continue
                 if msg.get("op") != "pf_fault":
+                    continue
+                side = str(msg.get("side") or "").strip().upper()
+                if side and side not in watched:
+                    continue
+                try:
+                    fault = int(msg.get("fault") or 0)
+                except (TypeError, ValueError):
+                    fault = 0
+                if fault == 0:
                     continue
                 _PF_ERROR_LATCH = True
     except Exception:
@@ -1936,12 +2051,32 @@ def _prefeeder_watch_loop() -> None:
         time.sleep(0.75)
 
 
+def _prefeeder_sides_online(status: dict | None) -> bool:
+    """Lados activos (feed_sides) reportados online por el maestro."""
+    if not isinstance(status, dict):
+        return False
+    for side in _active_feed_sides():
+        block = status.get(side)
+        if not isinstance(block, dict) or not block.get("online"):
+            return False
+    return True
+
+
 def _prefeeder_stabilize_and_lock() -> tuple[bool, str]:
+    """Desbloquea, espera condición segura y vuelve a bloquear listo.
+
+    Con holgura omitida y sensor OFF el esclavo puede quedarse en busy
+    alimentando mientras está desbloqueado; en ese caso no hay que esperar
+    stable=true (nunca llega): basta online + sin fallas activas, bloquear
+    (frena la alimentación) y confirmar ready.
+    Solo cuenta el lado de feed_sides (el contrario no bloquea).
+    """
     if not _prefeeder_required():
         return True, ""
+    _prefeeder_sync_omit_flags()
     _prefeeder_set_feed_lock(False)
     deadline = time.time() + _PF_STABILIZE_TIMEOUT_S
-    stable = False
+    can_lock = False
     while time.time() < deadline:
         st = _prefeeder_refresh_cache()
         if not st:
@@ -1952,17 +2087,23 @@ def _prefeeder_stabilize_and_lock() -> tuple[bool, str]:
             _prefeeder_set_feed_lock(True)
             _, msg = _machine_fault_message(sig)
             return False, msg
-        if st.get("stable"):
-            stable = True
+        # No usar solo stable del maestro: con un lado omitido exige L+R.
+        if _prefeeder_sides_online(st) and not _prefeeder_fault_codes_active(st):
+            can_lock = True
             break
         time.sleep(0.3)
     _prefeeder_set_feed_lock(True)
-    st = _prefeeder_refresh_cache()
-    if not stable and st and st.get("stable"):
-        stable = True
-    if not stable or not _prefeeder_status_ready(st):
-        if not st:
-            return False, error_codes.format_message("E092")
+    # Tras bloquear, el busy por holgura omitida debe pasar a idle/ready.
+    ready_deadline = time.time() + 8.0
+    st = None
+    while time.time() < ready_deadline:
+        st = _prefeeder_refresh_cache()
+        if st and _prefeeder_status_ready(st):
+            return True, ""
+        time.sleep(0.25)
+    if not st:
+        return False, error_codes.format_message("E092")
+    if not can_lock or not _prefeeder_status_ready(st):
         return False, error_codes.format_message("E099")
     return True, ""
 
@@ -2018,7 +2159,7 @@ def _prefeeder_fault_clear_now() -> bool:
     st = _prefeeder_refresh_cache() or _PF_CACHED_STATUS
     if not st:
         return True
-    return not error_codes.prefeeder_fault_codes(st)
+    return not _prefeeder_fault_codes_active(st)
 
 
 def _error_reset_blocked_message() -> str:
@@ -2039,13 +2180,17 @@ def _error_reset_blocked_message() -> str:
     if _prefeeder_required():
         st = _prefeeder_refresh_cache() or _PF_CACHED_STATUS
         if st:
-            faults = error_codes.prefeeder_fault_codes(st)
+            faults = _prefeeder_fault_codes_active(st)
             if faults:
                 return error_codes.format_message(faults[0])
     return error_codes.format_message("E046")
 
 
-def _prefeeder_public_summary() -> dict:
+def _prefeeder_public_summary(
+    *,
+    omit_l: bool | None = None,
+    omit_r: bool | None = None,
+) -> dict:
     """Resumen para el HMI (sin consultar COM si no hay caché)."""
     if not _prefeeder_required():
         return {
@@ -2066,10 +2211,10 @@ def _prefeeder_public_summary() -> dict:
             "label": "Sin enlace al maestro",
             "tone": "warn",
         }
-    faults = error_codes.prefeeder_fault_codes(st)
-    ready = bool(st.get("ready"))
-    stable = bool(st.get("stable"))
+    faults = _prefeeder_fault_codes_active(st, omit_l=omit_l, omit_r=omit_r)
     feed_lock = bool(st.get("feed_lock"))
+    ready = _prefeeder_status_ready(st)
+    stable = _prefeeder_sides_online(st) and not faults
     if faults:
         tone = "warn"
         label = "Bloqueado"
@@ -2775,9 +2920,19 @@ def _public_machine_state() -> dict:
             state["cut_mm_l"] = None
             state["cut_mm_last"] = None
             state["cut_comp_sequential"] = False
-        state["prefeeder"] = _prefeeder_public_summary()
+        # Leer omit flags aquí; armar resumen fuera del candado (evita reentrar
+        # _STATE_LOCK cuando hay E095/E098 y congela toda la HMI).
+        omit_l = bool(_MACHINE_STATE.get("omitir_holgura_l"))
+        omit_r = bool(_MACHINE_STATE.get("omitir_holgura_r"))
         state["ciclo_paso_a_paso"] = bool(_CYCLE_CTRL.get("step_mode"))
-        return state
+    # Efectivo = manual + auto (lado contrario a feed_sides).
+    omit_l, omit_r = _holgura_omit_effective(
+        state.get("feed_sides"), omit_l=omit_l, omit_r=omit_r
+    )
+    state["omitir_holgura_l"] = omit_l
+    state["omitir_holgura_r"] = omit_r
+    state["prefeeder"] = _prefeeder_public_summary(omit_l=omit_l, omit_r=omit_r)
+    return state
 
 
 def _set_machine_ui(
@@ -2919,10 +3074,20 @@ def _cycle_should_abort() -> bool:
 
 
 def _cycle_motion_halt_for_error() -> None:
+    """Para Motion y blower. No toca pinzas: si hay pieza sujeta, se retiene."""
     if _serial_port("motion"):
         _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
     if _serial_port("plc"):
         _send_plc_serial([_compact({"op": "blower_off"})])
+
+
+def _gripper_holding_set(holding: bool) -> None:
+    global _GRIPPER_HOLDING
+    _GRIPPER_HOLDING = bool(holding)
+
+
+def _gripper_holding() -> bool:
+    return bool(_GRIPPER_HOLDING)
 
 
 def _cycle_thread_alive() -> bool:
@@ -3221,6 +3386,11 @@ def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
         except Exception:
             pass
     _cycle_motion_halt_for_error()
+    if _gripper_holding():
+        _push_event(
+            "Pinzas retenidas — pieza sujeta hasta Reset o Posición inicial.",
+            "warn",
+        )
     if _OVERLAP.get("on"):
         _OVERLAP["feed_error"] = True
     if _prefeeder_required() and (
@@ -3231,6 +3401,7 @@ def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
 
 
 def _cycle_latch_reset() -> None:
+    _gripper_holding_set(False)
     with _STATE_LOCK:
         for key in _CYCLE_LATCH:
             _CYCLE_LATCH[key] = False
@@ -3450,6 +3621,8 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
     if step_id == "4":
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": True}), "E019"):
             return False
+        # Desde el cierre: si falla el resto del ciclo, retener (no abrir).
+        _gripper_holding_set(True)
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "holder", "on": False}), "E019"):
             return False
         if not _cycle_sleep_ms(int(params["ms_after_grip_release"])):
@@ -3530,8 +3703,12 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             return False
         if not _cycle_sleep_ms(int(params["ms_lm_at_discharge"])):
             return False
+        # Error en el tramo con pieza sujeta: no abrir pinzas (retención).
+        if _cycle_should_abort():
+            return False
         if not _plc_cmd_ok(_cycle_plc_send({"op": "valve", "name": "gripper", "on": False}), "E019"):
             return False
+        _gripper_holding_set(False)
         # La suelta de pinzas es el arranque del siguiente ciclo, si lo hay.
         if (
             _next_piece_follows()
@@ -3539,6 +3716,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             and not _OVERLAP["feed_done"]
             and not _CYCLE_CTRL["pause_after_step"].is_set()
             and not _cycle_should_stop()
+            and not _cycle_error_active()
         ):
             if not _overlap_arm(params):
                 return False
@@ -3566,6 +3744,7 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             and not _OVERLAP["on"]
             and not _OVERLAP["feed_done"]
             and not _cycle_should_stop()
+            and not _cycle_error_active()
         ):
             if not _overlap_arm(params):
                 return False
@@ -3590,15 +3769,28 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
         if not _cycle_sleep_ms(int(params["ms_blower_delay"])):
             _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
             return False
-        blower_ms = _cycle_blower_duration_ms(params)
-        _push_event(
-            f"Blower ON {blower_ms} ms "
-            f"(longitud programada {_cycle_blower_length_mm():.1f} mm)."
-        )
-        if not _plc_cmd_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
-            _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
-            return False
-        blower_deadline = time.time() + (blower_ms / 1000.0)
+
+        def _lm_already_home() -> bool:
+            if home_thread.is_alive():
+                return False
+            mst = _motion_status_get()
+            return bool(mst and mst.get("lm_homed") is True)
+
+        # Soplo solo en el regreso. Si ya está en home, no enciende.
+        blower_started = False
+        if not _lm_already_home():
+            blower_ms = _cycle_blower_duration_ms(params)
+            _push_event(
+                f"Blower ON {blower_ms} ms "
+                f"(longitud programada {_cycle_blower_length_mm():.1f} mm; "
+                f"corte al llegar a home)."
+            )
+            if not _plc_cmd_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms}), "E019"):
+                _send_motion_urgent(['{"op":"feeder_stop"}', '{"op":"lmguide_stop"}'])
+                return False
+            blower_started = True
+        else:
+            _push_event("LM Guide ya en home — blower omitido.")
 
         while home_thread.is_alive():
             if _cycle_wait_if_paused():
@@ -3634,8 +3826,13 @@ def _cycle_run_step(step_id: str, params: dict) -> bool:
             _cycle_fail("E044")
             return False
 
+        # Límite: en home se corta el soplo (no sigue soplando parado en origen).
+        if blower_started:
+            _cycle_plc_send({"op": "blower_off"})
+            _push_event("Blower OFF — LM Guide en home.")
+
         home_settle_deadline = time.time() + (int(params["ms_at_home_end"]) / 1000.0)
-        while time.time() < max(blower_deadline, home_settle_deadline):
+        while time.time() < home_settle_deadline:
             if _cycle_wait_if_paused():
                 _cycle_plc_send({"op": "blower_off"})
                 return False
@@ -3697,6 +3894,16 @@ def _plc_accepted(sent: dict, op: str) -> bool:
     return False
 
 
+def _overlap_fail_holder(code: str) -> None:
+    """Falla del holder en solape: aborta el ciclo al instante (no espera al paso 8)."""
+    if not code or code == "stop":
+        _OVERLAP["holder_error"] = "stop"
+        return
+    _OVERLAP["holder_error"] = code
+    _OVERLAP["feed_error"] = True
+    _cycle_fail(code)
+
+
 def _overlap_start_holder(params: dict) -> None:
     gen = int(_OVERLAP["gen"])
     worker_gen = getattr(_CYCLE_WORKER_TLS, "gen", None)
@@ -3713,7 +3920,7 @@ def _overlap_start_holder(params: dict) -> None:
         if _OVERLAP["gen"] != gen:
             return
         if not _plc_accepted(sent, "valve"):
-            _OVERLAP["holder_error"] = sent.get("code") or "E019"
+            _overlap_fail_holder(sent.get("code") or "E019")
             return
         if not _cycle_sleep_ms(int(params["ms_holder_enc_stable"])):
             if _OVERLAP["gen"] == gen:
@@ -3723,15 +3930,14 @@ def _overlap_start_holder(params: dict) -> None:
         if _OVERLAP["gen"] != gen:
             return
         if not ok_hw:
-            if code:
-                _OVERLAP["holder_error"] = code
+            _overlap_fail_holder(code or "E010")
             return
         # Holder/encoder cerrados: reset antes de alimentar (mismo orden que el paso 2).
         sent_enc = _cycle_motion_send({"op": "encoder_reset"}, timeout_s=2.0)
         if _OVERLAP["gen"] != gen:
             return
         if not _motion_cmd_ok(sent_enc, "encoder_reset"):
-            _OVERLAP["holder_error"] = sent_enc.get("code") or "E043"
+            _overlap_fail_holder(sent_enc.get("code") or "E043")
             return
         _OVERLAP["holder_ready"].set()
         _prod_log_op(
@@ -4537,7 +4743,8 @@ def _cycle_resume() -> tuple[bool, str]:
     idx = int(_MACHINE_STATE.get("ciclo_paso_indice") or 0)
     lot_open = bool(_LOT["active"])
     en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
-    # Pausa/error no borran el lote: si sigue activo, reanudar desde el paso guardado.
+    # Pausa limpia: reanuda el paso guardado. Tras error+purga, _rearm_piece
+    # ya dejó índice 0; cycles_done no se toca aquí.
     if not lot_open and idx <= 0 and not en_curso:
         return _cycle_start()
     if lot_open and not en_curso:
@@ -4552,6 +4759,8 @@ def _cycle_resume() -> tuple[bool, str]:
         idx = 0
     step_mode = bool(_CYCLE_CTRL.get("step_mode"))
     global _PIECE_TICK0
+    # Tras error+purga el reloj de pieza arranca en 0 (reintento).
+    # En pausa limpia se conserva el tiempo congelado.
     frozen = float(_MACHINE_STATE.get("tiempo_corriendo_s") or 0)
     with _CYCLE_SPAWN_LOCK:
         if _cycle_thread_alive():
@@ -4561,7 +4770,6 @@ def _cycle_resume() -> tuple[bool, str]:
             _CYCLE_CTRL["pause_after_step"].set()
         else:
             _CYCLE_CTRL["pause_after_step"].clear()
-        # Reanudar el reloj de pieza desde el valor congelado en pausa/error.
         _PIECE_TICK0 = time.time() - max(0.0, frozen)
         ok, err = _cycle_spawn_worker(idx, locked=True)
         if not ok:
@@ -4768,10 +4976,12 @@ def _cycle_reset_error() -> tuple[bool, str]:
 
     def _finish_reset_to_purge(keep: bool) -> tuple[bool, str]:
         # Ruta especial: tras Reset la purga es obligatoria antes de Reanudar/Start.
+        # El reset PLC apaga válvulas lógicas: termina la retención de pinzas.
+        _gripper_holding_set(False)
         with _STATE_LOCK:
             _MACHINE_STATE["post_error_purga"] = True
         msg = (
-            "Error limpiado. Completa la purga para reanudar."
+            "Error limpiado. Completa la purga; al reanudar se reintenta la pieza desde el paso 1."
             if keep
             else "Error limpiado. Completa la purga para operar."
         )
@@ -4798,10 +5008,15 @@ def _cycle_reset_error() -> tuple[bool, str]:
         return False, _error_reset_blocked_message()
     if _prefeeder_required():
         _prefeeder_stop_now()
-        if code not in _PF_SOFT_ERRORS:
+        # Holgura omitida: no exigir estabilización física de ese sensor.
+        soft_pf = code in _PF_SOFT_ERRORS or _prefeeder_holgura_omitted_for_code(code)
+        if not soft_pf:
             ok_pf, msg_pf = _prefeeder_stabilize_and_lock()
             if not ok_pf:
                 return False, msg_pf
+            _prefeeder_refresh_cache()
+        elif _prefeeder_holgura_omitted_for_code(code):
+            _prefeeder_set_feed_lock(True)
             _prefeeder_refresh_cache()
     st = _PF_CACHED_STATUS
     _pf_last_fault_sig = _prefeeder_fault_sig(st) if st else ()
@@ -4933,7 +5148,13 @@ def _checklist_log(empleado: str) -> None:
 
 
 def _rearm_piece(mensaje: str) -> None:
+    """Vuelve la pieza al paso 1. No toca cycles_done ni el lote activo."""
+    global _PIECE_FEED, _PIECE_BLOWER_MM, _PIECE_TICK0
+    _overlap_reset()
     _cycle_latch_reset()
+    _PIECE_FEED = {"R": None, "L": None}
+    _PIECE_BLOWER_MM = None
+    _PIECE_TICK0 = None
     _set_machine_ui(
         estado="paused",
         estado_label="Pausa",
@@ -4943,6 +5164,9 @@ def _rearm_piece(mensaje: str) -> None:
         step_id="1",
         step_index=0,
         progreso_pct=_lot_progress_pct(0) if int(_LOT.get("cycles_total") or 0) > 0 else 0,
+        tiempo_corriendo_s=0,
+        paralelo_id="",
+        feed={"R": None, "L": None},
     )
 
 
@@ -5110,9 +5334,18 @@ def _feeder_test(side: str, tune: dict) -> dict:
     }
 
 
+def _purge_feed_side() -> str | None:
+    """Lado de purga según feed_sides. None = ambos (LR)."""
+    sides = _run_sides()
+    return sides if sides in ("R", "L") else None
+
+
 def _feed_laser():
-    """Purga: ambos lados siguen hasta su láser. No valida encoder ni compensa."""
+    """Purga: lados activos (feed_sides) hasta su láser. Sin encoder ni compensación."""
     payload = {"op": "feed_stage", "mode": "laser"}
+    side = _purge_feed_side()
+    if side:
+        payload["side"] = side
     sent = _cycle_motion_send(payload, timeout_s=20.0)
     found, ok, error_name, feed = _read_feed_stage(sent)
     _set_machine_ui(feed=feed)
@@ -5126,6 +5359,9 @@ def _feed_laser():
 
 def _feed_clean():
     payload = {"op": "feed_stage", "mode": "clean", "timeout_ms": PURGE_CLEAN_MS}
+    side = _purge_feed_side()
+    if side:
+        payload["side"] = side
     sent = _cycle_motion_send(payload, timeout_s=8.0)
     found, ok, error_name, feed = _read_feed_stage(sent)
     _set_machine_ui(feed=feed)
@@ -5190,12 +5426,33 @@ def _purga_finish(cancelled: bool) -> None:
             with _STATE_LOCK:
                 _MACHINE_STATE["post_error_purga"] = False
             if keep:
-                _set_machine_ui(
-                    estado="paused",
-                    estado_label="Pausa",
-                    mensaje="Purga terminada. Reanudar para continuar desde el punto pausado.",
-                    en_curso=True,
-                )
+                if _LOT.get("tray_wait"):
+                    deposits = int(_LOT.get("deposits_per_tray") or 0)
+                    _set_machine_ui(
+                        estado="paused",
+                        estado_label="Charola llena",
+                        mensaje=(
+                            f"Purga terminada. Charola llena — {deposits} ciclos. "
+                            "Vacía la charola y confirma."
+                        ),
+                        en_curso=True,
+                        ciclo_error="",
+                    )
+                else:
+                    # Pieza incompleta: se reintenta desde el 1. cycles_done intacto.
+                    if _LOT.get("active"):
+                        piece = int(_LOT.get("cycles_done") or 0) + 1
+                        total = int(_LOT.get("cycles_total") or 0)
+                        rearm_msg = (
+                            f"Purga terminada. Pieza {piece} de {total} se reintenta "
+                            "desde el paso 1. Reanudar para continuar el lote."
+                        )
+                    else:
+                        rearm_msg = (
+                            "Purga terminada. La pieza se reintenta desde el paso 1. "
+                            "Reanudar para continuar."
+                        )
+                    _rearm_piece(rearm_msg)
             else:
                 _set_machine_ui(
                     estado="idle",
@@ -5224,6 +5481,7 @@ def _purga_prepare() -> None:
     if not _cycle_plc_send({"op": "all_off"}).get("sent"):
         _purga_finish(True)
         return
+    _gripper_holding_set(False)
     if _ROUTINE["stop"].is_set() or not _routine_move_lm_mm(PURGE_PARK_MM):
         _purga_finish(True)
         return
@@ -5283,7 +5541,9 @@ def _purga_alimentar_run() -> None:
         else:
             _set_routine_ui(rutina_fase="espera", mensaje="No se cerró holder y encoder.")
         return
-    _set_routine_ui(mensaje="Alimentación: ambos lados hasta el láser.")
+    side = _purge_feed_side()
+    side_name = {"R": "derecho", "L": "izquierdo"}.get(side or "", "ambos lados")
+    _set_routine_ui(mensaje=f"Alimentación: {side_name} hasta el láser.")
     ok, code, _feed = _feed_laser()
     if _ROUTINE["stop"].is_set():
         _purga_finish(True)
@@ -5292,7 +5552,7 @@ def _purga_alimentar_run() -> None:
         _push_event(error_codes.format_message(code), "error")
         _set_routine_ui(
             rutina_fase="espera",
-            mensaje="Un lado no llegó al láser. Puedes repetir, continuar o terminar.",
+            mensaje="No llegó al láser. Puedes repetir, continuar o terminar.",
         )
         return
     _set_routine_ui(
@@ -5345,16 +5605,36 @@ def _purge_cut() -> bool:
         return False
 
     _set_routine_ui(mensaje="NO METAS LAS MANOS. Regresando a home.")
-    home = _cycle_motion_send({"op": "lmguide_move", "target": "home"}, timeout_s=40.0)
-    if not _motion_cmd_ok(home, "lmguide_move") or _ROUTINE["stop"].is_set():
-        return False
+    home_result: dict = {}
+
+    def send_home() -> None:
+        home_result["sent"] = _cycle_motion_send(
+            {"op": "lmguide_move", "target": "home"}, timeout_s=40.0
+        )
+
+    home_thread = threading.Thread(target=send_home, daemon=True)
+    home_thread.start()
     if not _routine_sleep_ms(int(params["ms_blower_delay"])):
+        _cycle_plc_send({"op": "blower_off"})
         return False
-    blower_ms = _cycle_blower_duration_ms(params)
-    if not sent_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms})):
+    blower_started = False
+    if home_thread.is_alive():
+        blower_ms = _cycle_blower_duration_ms(params)
+        if not sent_ok(_cycle_plc_send({"op": "blower_on", "ms": blower_ms})):
+            return False
+        blower_started = True
+    while home_thread.is_alive():
+        if _ROUTINE["stop"].is_set():
+            _cycle_plc_send({"op": "blower_off"})
+            return False
+        home_thread.join(0.05)
+    home = home_result.get("sent") or {}
+    if not _motion_cmd_ok(home, "lmguide_move") or _ROUTINE["stop"].is_set():
+        _cycle_plc_send({"op": "blower_off"})
         return False
-    if not _routine_sleep_ms(blower_ms):
-        return False
+    # Límite: en home se corta el soplo.
+    if blower_started:
+        _cycle_plc_send({"op": "blower_off"})
     if not _routine_sleep_ms(int(params["ms_at_home_end"])):
         return False
     _cycle_plc_send({"op": "all_off"})
@@ -5381,7 +5661,9 @@ def _purga_limpiar_run() -> None:
         else:
             _set_routine_ui(rutina_fase="espera", mensaje="No se cerró holder y encoder.")
         return
-    _set_routine_ui(mensaje="Limpiar: alimentando 3 s sin mirar el láser.")
+    side = _purge_feed_side()
+    side_name = {"R": "derecho", "L": "izquierdo"}.get(side or "", "ambos lados")
+    _set_routine_ui(mensaje=f"Limpiar ({side_name}): alimentando 3 s sin mirar el láser.")
     ok, code, _feed = _feed_clean()
     if _ROUTINE["stop"].is_set():
         _purga_finish(True)
@@ -5445,6 +5727,7 @@ def _posicion_inicial_run() -> None:
         return
     enc = _cycle_motion_send({"op": "encoder_set0", "side": "both"}, timeout_s=2.0)
     _cycle_plc_send({"op": "all_off"})
+    _gripper_holding_set(False)
     if not _motion_cmd_ok(enc, "encoder_set0"):
         _push_event("El eje llegó a cero. Los encoders no confirmaron el cero.", "warn")
     if in_purge:
@@ -5509,11 +5792,11 @@ def _alimentar_run(side: str) -> None:
 
 
 def _alimentar_izquierda(data=None):
-    return False, "Mantén pulsado Alimentar izquierda en el panel."
+    return False, "Mantén pulsado JOG - L en el panel."
 
 
 def _alimentar_derecha(data=None):
-    return False, "Mantén pulsado Alimentar derecha en el panel."
+    return False, "Mantén pulsado JOG - R en el panel."
 
 
 def _feeder_init_now() -> tuple[bool, str]:
@@ -5565,6 +5848,7 @@ def _prealimentador_iniciar(_data=None) -> tuple[bool, str]:
 
 
 def _omitir_holgura(side: str, data) -> tuple[bool, str]:
+    global _pf_last_fault_sig, _PF_ERROR_LATCH
     empleado = _empleado(data.get("empleado"))
     if not empleado:
         return False, "Hace falta el número de empleado, cinco dígitos."
@@ -5575,9 +5859,17 @@ def _omitir_holgura(side: str, data) -> tuple[bool, str]:
     nombre = _SIDE_NAME[side]
     if _prefeeder_required():
         _prefeeder_set_omit(side, nxt)
+        st = _prefeeder_refresh_cache()
+        # Tras omitir, la E095/E098 de ese lado deja de bloquear Reset.
+        _pf_last_fault_sig = _prefeeder_fault_sig(st)
+        if not _pf_last_fault_sig:
+            _PF_ERROR_LATCH = False
     if nxt:
-        _push_event(f"Holgura {nombre} omitida. Empleado {empleado}.")
-        return True, f"Holgura {nombre} omitida."
+        _push_event(
+            f"Holgura {nombre} omitida. Empleado {empleado}. "
+            f"Pulsa Reset para limpiar el error."
+        )
+        return True, f"Holgura {nombre} omitida. Pulsa Reset."
     _push_event(f"Holgura {nombre} restaurada. Empleado {empleado}.")
     return True, f"Holgura {nombre} restaurada."
 
@@ -6043,6 +6335,8 @@ def cycle_config():
         )
     except OSError:
         return jsonify({"ok": False, "error": "No se pudo guardar cycle.json"}), 500
+    # feed_sides L/R → omitir holgura del contrario en el PreAlimentador.
+    _prefeeder_sync_omit_flags()
     return jsonify(
         {
             "ok": True,
