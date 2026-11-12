@@ -84,6 +84,20 @@
     empleadoModalClose: document.getElementById("empleadoModalClose"),
     empleadoInput: document.getElementById("empleadoInput"),
     empleadoConfirm: document.getElementById("empleadoConfirm"),
+    btnOpenRecovery: document.getElementById("btnOpenRecovery"),
+    recoveryModal: document.getElementById("recoveryModal"),
+    recoveryModalClose: document.getElementById("recoveryModalClose"),
+    recoveryModalTitle: document.getElementById("recoveryModalTitle"),
+    recoveryStepLabel: document.getElementById("recoveryStepLabel"),
+    recoveryLead: document.getElementById("recoveryLead"),
+    recoveryErrorBox: document.getElementById("recoveryErrorBox"),
+    recoveryCode: document.getElementById("recoveryCode"),
+    recoveryErrorDesc: document.getElementById("recoveryErrorDesc"),
+    recoveryText: document.getElementById("recoveryText"),
+    recoverySensors: document.getElementById("recoverySensors"),
+    recoverySensorR: document.getElementById("recoverySensorR"),
+    recoverySensorL: document.getElementById("recoverySensorL"),
+    recoveryActions: document.getElementById("recoveryActions"),
   };
 
   let eventsEnabled = false;
@@ -105,6 +119,10 @@
   let pfPollTimer = null;
   let checklistViewKey = "";
   let empleadoWait = null;
+  let recoveryPollTimer = null;
+  let recoveryPollBusy = false;
+  let recoveryViewKey = "";
+  let recoveryWantOpen = false;
 
   const PLC_OUTPUTS = [
     ["holder", "holder"],
@@ -401,6 +419,7 @@
     syncProcessControls(state);
     syncCycleStepTestControls(state);
     syncRoutine(state);
+    syncRecovery(state);
     renderCycleSteps(
       state.ciclo_paso_id || "",
       state.ciclo_paso_indice,
@@ -568,6 +587,272 @@
     setPlcPressed(btn, status.holder && status.encoder);
   }
 
+  function setRecoverySensorEl(el, on) {
+    if (!el) return;
+    el.textContent = on ? "Encendido" : "Apagado";
+    el.classList.toggle("is-on", !!on);
+    el.classList.toggle("is-off", !on);
+  }
+
+  function parseRecoveryError(code, mensaje) {
+    const raw = String(mensaje || "").trim();
+    const m = raw.match(/^([A-Z]?\d+)\s+([^:]+):\s*(.*)$/i);
+    if (m) {
+      return {
+        code: m[1],
+        module: m[2].trim(),
+        desc: m[3].trim(),
+      };
+    }
+    return {
+      code: String(code || "").trim(),
+      module: "",
+      desc: raw || "La máquina se detuvo.",
+    };
+  }
+
+  function setRecoveryPoll(on) {
+    if (on) {
+      if (recoveryPollTimer) return;
+      pollRecoverySensors();
+      recoveryPollTimer = setInterval(pollRecoverySensors, 500);
+      return;
+    }
+    if (recoveryPollTimer) {
+      clearInterval(recoveryPollTimer);
+      recoveryPollTimer = null;
+    }
+  }
+
+  async function pollRecoverySensors() {
+    if (recoveryPollBusy) return;
+    if (!els.recoveryModal || els.recoveryModal.hidden) return;
+    recoveryPollBusy = true;
+    try {
+      let on = true;
+      const res = await fetch("/api/plc/status");
+      const data = await res.json();
+      const st = (data && data.status) || {};
+      on =
+        st.fault_cutter === true ||
+        st.sens_cutter === true ||
+        st.cutter_r === true ||
+        st.cutter_l === true;
+      // Un sensor físico de cortador; se muestra en ambos lados.
+      setRecoverySensorEl(els.recoverySensorR, on);
+      setRecoverySensorEl(els.recoverySensorL, on);
+      const cont = els.recoveryActions
+        ? els.recoveryActions.querySelector('[data-recovery="manguera"]')
+        : null;
+      if (cont) cont.disabled = on;
+    } catch (e) {
+      /* ignore */
+    } finally {
+      recoveryPollBusy = false;
+    }
+  }
+
+  function openRecoveryModal() {
+    if (!els.recoveryModal) return;
+    recoveryWantOpen = true;
+    els.recoveryModal.hidden = false;
+  }
+
+  function closeRecoveryModal() {
+    recoveryWantOpen = false;
+    setRecoveryPoll(false);
+    if (els.recoveryModal) els.recoveryModal.hidden = true;
+  }
+
+  function recoveryPrimaryButton(label, className, datasetKey) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn " + className;
+    btn.textContent = label;
+    btn.setAttribute("data-recovery", datasetKey);
+    return btn;
+  }
+
+  function renderRecoveryActions(step, cuttersOn) {
+    if (!els.recoveryActions) return;
+    els.recoveryActions.innerHTML = "";
+    if (step === "error") {
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton("Reset", "btn-reset", "reset")
+      );
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton("Salir", "btn-secondary", "salir")
+      );
+      return;
+    }
+    if (step === "piezas") {
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton(
+          "Las piezas están bien",
+          "btn-start",
+          "piezas"
+        )
+      );
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton("Salir", "btn-secondary", "salir")
+      );
+      return;
+    }
+    if (step === "manguera") {
+      const cont = recoveryPrimaryButton(
+        "Continuar",
+        "btn-resume",
+        "manguera"
+      );
+      cont.disabled = !!cuttersOn;
+      els.recoveryActions.appendChild(cont);
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton("Salir", "btn-secondary", "salir")
+      );
+      return;
+    }
+    if (step === "purga") {
+      const wait = recoveryPrimaryButton(
+        "Proceso de limpieza en curso, espera…",
+        "btn-secondary",
+        "wait"
+      );
+      wait.disabled = true;
+      els.recoveryActions.appendChild(wait);
+      return;
+    }
+    if (step === "listo") {
+      els.recoveryActions.appendChild(
+        recoveryPrimaryButton(
+          "Volver a la pantalla principal",
+          "btn-start",
+          "listo"
+        )
+      );
+    }
+  }
+
+  function syncRecovery(state) {
+    const rec = state.recovery || {};
+    const active = !!rec.active;
+    const step = String(rec.step || "");
+    const enError = state.estado === "error" || !!state.ciclo_error;
+    const showBtn = active || enError || !!state.post_error_purga;
+
+    if (els.btnOpenRecovery) {
+      els.btnOpenRecovery.hidden = !showBtn;
+      els.btnOpenRecovery.disabled = !showBtn;
+      if (step === "listo") {
+        els.btnOpenRecovery.textContent = "Ver recuperación";
+      } else if (enError) {
+        els.btnOpenRecovery.textContent = "Abrir Error";
+      } else {
+        els.btnOpenRecovery.textContent = "Continuar recuperación";
+      }
+    }
+
+    if (!active && !enError) {
+      setRecoveryPoll(false);
+      if (els.recoveryModal && !els.recoveryModal.hidden) {
+        closeRecoveryModal();
+      }
+      recoveryViewKey = "";
+      return;
+    }
+
+    const viewStep = step || (enError ? "error" : "");
+    const code = rec.code || state.ciclo_error || "";
+    const key = viewStep + "|" + code + "|" + (recoveryWantOpen ? "1" : "0");
+    const modalOpen = els.recoveryModal && !els.recoveryModal.hidden;
+    if (!modalOpen && !recoveryWantOpen) {
+      setRecoveryPoll(false);
+      return;
+    }
+    if (!modalOpen && recoveryWantOpen) {
+      openRecoveryModal();
+    }
+
+    if (els.recoveryModalTitle) {
+      els.recoveryModalTitle.textContent =
+        viewStep === "listo" ? "Listo" : "Recuperación";
+    }
+
+    const limitErr = code === "E094" || code === "E097";
+    const stepMeta = {
+      error: [
+        "Paso 1 de 5",
+        limitErr ? "Sensor límite PreAlimentador" : "",
+        limitErr
+          ? "Revisa el PreAlimentador y deja holgura adecuada. Usa JOG L/R (HMI o botón) si hace falta. Cuando el límite se libere, pulsa Reset y sigue los pasos."
+          : "Pulsa Reset para soltar el holder y la pieza. Luego sigue los pasos.",
+      ],
+      piezas: [
+        "Paso 2 de 5",
+        "Revisa las piezas",
+        "Confirma que las piezas están bien antes de seguir.",
+      ],
+      manguera: [
+        "Paso 3 de 5",
+        "Posiciona la manguera",
+        "Mueve la manguera hacia atrás hasta apagar ambos cortadores. Cuando los dos digan Apagado, pulsa Continuar.",
+      ],
+      purga: [
+        "Paso 4 de 5",
+        "NO INTRODUCIR MANOS",
+        "Proceso de limpieza en curso, espera.",
+      ],
+      listo: [
+        "Paso 5 de 5",
+        "Listo",
+        "Ya puedes volver a la pantalla principal y pulsar Reanudar. Esta pieza no suma al contador.",
+      ],
+    };
+    const meta = stepMeta[viewStep] || stepMeta.error;
+    if (els.recoveryStepLabel) els.recoveryStepLabel.textContent = meta[0];
+    if (els.recoveryLead) {
+      els.recoveryLead.hidden = !meta[1];
+      els.recoveryLead.textContent = meta[1] || "";
+      els.recoveryLead.classList.toggle("is-hands-warn", viewStep === "purga");
+    }
+    if (els.recoveryText) {
+      els.recoveryText.innerHTML =
+        '<span class="recovery-text__label">INSTRUCCIONES:</span> ' +
+        meta[2];
+      els.recoveryText.classList.toggle("is-hands-warn", viewStep === "purga");
+    }
+    if (els.recoveryModal) {
+      const panel = els.recoveryModal.querySelector(".modal--recovery");
+      if (panel) panel.classList.toggle("is-hands-warn", viewStep === "purga");
+    }
+
+    const showErrorBox = viewStep === "error";
+    const parsed = parseRecoveryError(code, rec.mensaje || state.mensaje || "");
+    if (els.recoveryErrorBox) {
+      els.recoveryErrorBox.hidden = !showErrorBox;
+    }
+    if (showErrorBox) {
+      if (els.recoveryCode) {
+        els.recoveryCode.textContent = parsed.module
+          ? parsed.code + " · " + parsed.module
+          : parsed.code || code || "Error";
+      }
+      if (els.recoveryErrorDesc) {
+        els.recoveryErrorDesc.textContent = parsed.desc;
+      }
+    }
+
+    if (els.recoverySensors) {
+      els.recoverySensors.hidden = viewStep !== "manguera";
+    }
+    setRecoveryPoll(viewStep === "manguera" && !!modalOpen);
+
+    if (key !== recoveryViewKey) {
+      recoveryViewKey = key;
+      renderRecoveryActions(viewStep, false);
+      if (viewStep === "manguera") pollRecoverySensors();
+    }
+  }
+
   function syncProcessControls(state) {
     const panel = getProcessPanel();
     if (!panel) return;
@@ -623,9 +908,9 @@
       } else if (purga) {
         start.title = "Hay una purga en curso.";
       } else if (enError) {
-        start.title = "Corrige el error y pulsa Reset.";
+        start.title = "Abre el error y sigue la recuperación.";
       } else if (postErrorPurga) {
-        start.title = "Tras un error debes completar la purga.";
+        start.title = "Completa la recuperación antes de Iniciar.";
       } else if (cantidadImpar) {
         start.title =
           "Con ambos lados la cantidad tiene que ser par y de al menos 2 piezas.";
@@ -646,13 +931,13 @@
         postErrorPurga;
       resume.title = resume.disabled
         ? enError
-          ? "Corrige el error y pulsa Reset."
+          ? "Abre el error y sigue la recuperación."
           : postErrorPurga
-            ? "Tras un error debes completar la purga antes de Reanudar."
+            ? "Completa la recuperación antes de Reanudar."
             : paused && !(enCurso || state.lote_activo)
               ? "No hay un ciclo pausado para reanudar."
               : ""
-        : "Continúa el ciclo desde donde quedó.";
+        : "Continúa el ciclo desde el inicio de la pieza actual.";
     }
     if (pause) {
       pause.disabled = (!running && !(enError && enCurso)) || rutina;
@@ -675,7 +960,7 @@
     if (reset) {
       reset.disabled = !enError;
       reset.title = enError
-        ? "Cuando PLC, Motion y PreAlimentador estén bien: limpia el error y luego haz la purga."
+        ? "Abre el error y pulsa Reset ahí, o pulsa Reset para soltar holder y pieza."
         : "Solo aplica cuando hay un error activo.";
     }
 
@@ -1298,6 +1583,9 @@
       alimentar_derecha: "JOG - R",
       omitir_holgura_izquierda: "Omitir holgura izquierda",
       omitir_holgura_derecha: "Omitir holgura derecha",
+      recovery_confirm_piezas: "Piezas bien",
+      recovery_confirm_manguera: "Continuar recuperación",
+      recovery_done: "Volver",
     };
     return labels[action] || action;
   }
@@ -1410,6 +1698,15 @@
         lastProcessAction = action;
       }
       if (data.state) applyState(data.state);
+      if (
+        action === "reset" &&
+        data.state &&
+        data.state.recovery &&
+        data.state.recovery.active &&
+        data.state.recovery.step === "piezas"
+      ) {
+        openRecoveryModal();
+      }
       if (data.motion_data) motionApplyDataFields(data.motion_data);
     } catch (err) {
       pushLocalEvent("Sin conexión con el servidor.", "error");
@@ -1746,6 +2043,10 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Escape") return;
+    if (els.recoveryModal && !els.recoveryModal.hidden) {
+      closeRecoveryModal();
+      return;
+    }
     if (els.empleadoModal && !els.empleadoModal.hidden) {
       closeEmpleado();
       return;
@@ -1764,6 +2065,55 @@
     }
     if (!els.settingsModal.hidden) closeSettings();
   });
+
+  if (els.btnOpenRecovery) {
+    els.btnOpenRecovery.addEventListener("click", function () {
+      openRecoveryModal();
+      fetchState();
+    });
+  }
+  if (els.recoveryModalClose) {
+    els.recoveryModalClose.addEventListener("click", closeRecoveryModal);
+  }
+  if (els.recoveryModal) {
+    els.recoveryModal.addEventListener("click", function (e) {
+      if (e.target === els.recoveryModal) closeRecoveryModal();
+    });
+  }
+  if (els.recoveryActions) {
+    els.recoveryActions.addEventListener("click", async function (e) {
+      const btn = e.target.closest("[data-recovery]");
+      if (!btn || btn.disabled) return;
+      const op = btn.getAttribute("data-recovery");
+      if (op === "salir") {
+        closeRecoveryModal();
+        return;
+      }
+      if (op === "reset") {
+        await sendAction("proceso", "reset");
+        recoveryWantOpen = true;
+        openRecoveryModal();
+        return;
+      }
+      if (op === "piezas") {
+        await sendAction("operacion_manual", "recovery_confirm_piezas");
+        recoveryWantOpen = true;
+        openRecoveryModal();
+        return;
+      }
+      if (op === "manguera") {
+        await sendAction("operacion_manual", "recovery_confirm_manguera");
+        recoveryWantOpen = true;
+        openRecoveryModal();
+        return;
+      }
+      if (op === "listo") {
+        await sendAction("operacion_manual", "recovery_done");
+        closeRecoveryModal();
+        return;
+      }
+    });
+  }
 
   if (els.checklistModalClose) els.checklistModalClose.addEventListener("click", closeChecklist);
   if (els.checklistModal) {
@@ -2074,8 +2424,8 @@
       pfPaintBanner(side === "L" ? els.pfBanL : els.pfBanR, block);
       const sen = (block && block.sensors) || {};
       pfPaintSensor(document.getElementById("pfCyl" + side), !!sen.cylinder, true);
-      pfPaintSensor(document.getElementById("pfHose" + side), !!sen.hose, true);
       pfPaintSensor(document.getElementById("pfHolg" + side), !!sen.holgura, false);
+      pfPaintSensor(document.getElementById("pfLim" + side), !!sen.limit, true);
       if (block && block.cfg) tuneFromMaster[side] = block.cfg;
     });
     // Leer actuales del maestro sin pisar si el operador está editando.
@@ -2237,9 +2587,9 @@
         cicloCorriendo || enError || (!!rutina && !purga);
       setButtonOn(purgaBtn, purga || (postErrorPurga && !enError && !purga));
       purgaBtn.title = enError
-        ? "Limpia el error con Reset antes de la purga."
+        ? "Abre el error y pulsa Reset antes de la purga."
         : postErrorPurga && !purga
-          ? "Obligatoria tras el error. Completa la purga para continuar."
+          ? "La recuperación guiada hace la purga sola. También puedes hacerla aquí."
           : "";
       if (postErrorPurga && !enError && !purga && !purgaBtn.disabled) {
         purgaBtn.classList.add("is-active");

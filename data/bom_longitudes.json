@@ -1,0 +1,902 @@
+[
+  {
+    "item": "030-1200-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (1.600)",
+    "longitud": 1600
+  },
+  {
+    "item": "030-2820-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (1.140)",
+    "longitud": 1140
+  },
+  {
+    "item": "030-3620-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (1.070)",
+    "longitud": 1070
+  },
+  {
+    "item": "030-3350-1-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.870)",
+    "longitud": 870
+  },
+  {
+    "item": "030-1360-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.865)",
+    "longitud": 865
+  },
+  {
+    "item": "130-7270-4-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.830)",
+    "longitud": 830
+  },
+  {
+    "item": "030-2150-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.825)",
+    "longitud": 825
+  },
+  {
+    "item": "104101-TUBE1-4-M",
+    "desc": "WIP, 7113-500009 (.800)",
+    "longitud": 800
+  },
+  {
+    "item": "6650-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.800)",
+    "longitud": 800
+  },
+  {
+    "item": "234-4797-TUBE1",
+    "desc": "WIP, 7113-500009 (.800)",
+    "longitud": 800
+  },
+  {
+    "item": "6650-TUBE1",
+    "desc": "WIP, 7113-500009 (.800)",
+    "longitud": 800
+  },
+  {
+    "item": "234-4797-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.800)",
+    "longitud": 800
+  },
+  {
+    "item": "030-2830-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.780)",
+    "longitud": 780
+  },
+  {
+    "item": "030-2390-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.740)",
+    "longitud": 740
+  },
+  {
+    "item": "030-1320-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.720)",
+    "longitud": 720
+  },
+  {
+    "item": "030-1550-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.700)",
+    "longitud": 700
+  },
+  {
+    "item": "030-2200-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.695)",
+    "longitud": 695
+  },
+  {
+    "item": "030-2620-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.680)",
+    "longitud": 680
+  },
+  {
+    "item": "030-4080-1-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.660)",
+    "longitud": 660
+  },
+  {
+    "item": "030-2010-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.660)",
+    "longitud": 660
+  },
+  {
+    "item": "030-1290-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.635)",
+    "longitud": 635
+  },
+  {
+    "item": "030-2780-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.603)",
+    "longitud": 603
+  },
+  {
+    "item": "030-4070-1-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.600)",
+    "longitud": 600
+  },
+  {
+    "item": "030-2510-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.575)",
+    "longitud": 575
+  },
+  {
+    "item": "030-3064-1-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.530)",
+    "longitud": 530
+  },
+  {
+    "item": "030-2022-4-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.525)",
+    "longitud": 525
+  },
+  {
+    "item": "030-2180-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.515)",
+    "longitud": 515
+  },
+  {
+    "item": "030-1470-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.510)",
+    "longitud": 510
+  },
+  {
+    "item": "030-1810-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.500)",
+    "longitud": 500
+  },
+  {
+    "item": "030-3060-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.495)",
+    "longitud": 495
+  },
+  {
+    "item": "030-2670-4-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.490)",
+    "longitud": 490
+  },
+  {
+    "item": "414-8250-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.480)",
+    "longitud": 480
+  },
+  {
+    "item": "030-3490-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.475)",
+    "longitud": 475
+  },
+  {
+    "item": "030-3070-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.475)",
+    "longitud": 475
+  },
+  {
+    "item": "030-2070-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.470)",
+    "longitud": 470
+  },
+  {
+    "item": "102104-TUBE-12-M",
+    "desc": "WIP, 7113-500009 (.460)",
+    "longitud": 460
+  },
+  {
+    "item": "030-5110-TUBE",
+    "desc": "WIP, 7113-500009 (.460)",
+    "longitud": 460
+  },
+  {
+    "item": "030-1530-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.460)",
+    "longitud": 460
+  },
+  {
+    "item": "030-1890-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.455)",
+    "longitud": 455
+  },
+  {
+    "item": "102101-TUBE6-1-M",
+    "desc": "WIP, 7113-500009 (.450)",
+    "longitud": 450
+  },
+  {
+    "item": "105101-TUBE1-8-M",
+    "desc": "WIP, 7113-500009 (0.447)",
+    "longitud": 447
+  },
+  {
+    "item": "030-2260-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.445)",
+    "longitud": 445
+  },
+  {
+    "item": "102101-TUBE1-18-M",
+    "desc": "WIP, 7113-500009 (.430)",
+    "longitud": 430
+  },
+  {
+    "item": "030-3750-1-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.430)",
+    "longitud": 430
+  },
+  {
+    "item": "030-5620-TUBE",
+    "desc": "WIP, 7113-500009 (.420)",
+    "longitud": 420
+  },
+  {
+    "item": "030-3000-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.420)",
+    "longitud": 420
+  },
+  {
+    "item": "102104-TUBE-18-M",
+    "desc": "WIP, 7113-500009 (.420)",
+    "longitud": 420
+  },
+  {
+    "item": "414-8160-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.415)",
+    "longitud": 415
+  },
+  {
+    "item": "030-6670-TUBE-M",
+    "desc": "WIP, 7113-500009 (.410)",
+    "longitud": 410
+  },
+  {
+    "item": "102104-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.410)",
+    "longitud": 410
+  },
+  {
+    "item": "030-6670-TUBE",
+    "desc": "WIP, 7113-500009 (.410)",
+    "longitud": 410
+  },
+  {
+    "item": "030-3780-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.410)",
+    "longitud": 410
+  },
+  {
+    "item": "102101-TUBE3-9-M",
+    "desc": "WIP, 7113-500009 (.410)",
+    "longitud": 410
+  },
+  {
+    "item": "030-1140-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.405)",
+    "longitud": 405
+  },
+  {
+    "item": "030-5930-2-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.400)",
+    "longitud": 400
+  },
+  {
+    "item": "130-4141-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.380)",
+    "longitud": 380
+  },
+  {
+    "item": "030-1260-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.380)",
+    "longitud": 380
+  },
+  {
+    "item": "030-1340-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.380)",
+    "longitud": 380
+  },
+  {
+    "item": "414-8080-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.375)",
+    "longitud": 375
+  },
+  {
+    "item": "230-0721-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.370)",
+    "longitud": 370
+  },
+  {
+    "item": "102101-TUBE1-15-M",
+    "desc": "WIP, 7113-500009 (.370)",
+    "longitud": 370
+  },
+  {
+    "item": "030-2190-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.365)",
+    "longitud": 365
+  },
+  {
+    "item": "130-7150-4-R-TUBE1",
+    "desc": "WIP, 7113-500009 (.355)",
+    "longitud": 355
+  },
+  {
+    "item": "030-2470-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.355)",
+    "longitud": 355
+  },
+  {
+    "item": "030-1790-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.350)",
+    "longitud": 350
+  },
+  {
+    "item": "102145-TUBE4-2-M",
+    "desc": "7113-500009 (.345)",
+    "longitud": 345
+  },
+  {
+    "item": "030-3960-1-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.340)",
+    "longitud": 340
+  },
+  {
+    "item": "102101-TUBE4-7-M",
+    "desc": "WIP, 7113-500009 (.340)",
+    "longitud": 340
+  },
+  {
+    "item": "102101-004D-1-M",
+    "desc": "WIP, 7113-500009 (.335)",
+    "longitud": 335
+  },
+  {
+    "item": "102101-TUBE4-1-M",
+    "desc": "WIP, 7113-500009 (.335)",
+    "longitud": 335
+  },
+  {
+    "item": "414-8240-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.335)",
+    "longitud": 335
+  },
+  {
+    "item": "030-1580-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.330)",
+    "longitud": 330
+  },
+  {
+    "item": "530-0251-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.325)",
+    "longitud": 325
+  },
+  {
+    "item": "530-0570-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.325)",
+    "longitud": 325
+  },
+  {
+    "item": "530-0571-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.325)",
+    "longitud": 325
+  },
+  {
+    "item": "030-3560-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.320)",
+    "longitud": 320
+  },
+  {
+    "item": "102101-TUBE2-1-M",
+    "desc": "WIP, 7113-500009 (.310)",
+    "longitud": 310
+  },
+  {
+    "item": "130-7250-2-R-TUBE-M",
+    "desc": "WIP, 7113-500009 (.310)",
+    "longitud": 310
+  },
+  {
+    "item": "102101-TUBE1-100-M",
+    "desc": "WIP, 7113-500009 (.310)",
+    "longitud": 310
+  },
+  {
+    "item": "105101-TUBE3-5-M",
+    "desc": "WIP, 7113-500009 (.310)",
+    "longitud": 310
+  },
+  {
+    "item": "230-1362-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.305)",
+    "longitud": 305
+  },
+  {
+    "item": "102101-TUBE1-87-M",
+    "desc": "WIP, 7113-500009 (.305)",
+    "longitud": 305
+  },
+  {
+    "item": "030-5051-TUBE",
+    "desc": "WIP, 7113-500009 (.300)",
+    "longitud": 300
+  },
+  {
+    "item": "030-2400-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.300)",
+    "longitud": 300
+  },
+  {
+    "item": "102104-TUBE-7-M",
+    "desc": "WIP, 7113-500009 (.300)",
+    "longitud": 300
+  },
+  {
+    "item": "230-3200-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.295)",
+    "longitud": 295
+  },
+  {
+    "item": "414-8220-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.295)",
+    "longitud": 295
+  },
+  {
+    "item": "5080-TUBE",
+    "desc": "WIP, 7113-500009 (.290)",
+    "longitud": 290
+  },
+  {
+    "item": "030-1300-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.290)",
+    "longitud": 290
+  },
+  {
+    "item": "102104-TUBE-9-M",
+    "desc": "WIP, 7113-500009 (.290)",
+    "longitud": 290
+  },
+  {
+    "item": "030-5470-2-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.285)",
+    "longitud": 285
+  },
+  {
+    "item": "130-7220-3-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.280)",
+    "longitud": 280
+  },
+  {
+    "item": "5800-1-TUBE1",
+    "desc": "WIP, 7113-500009 (.280)",
+    "longitud": 280
+  },
+  {
+    "item": "102104-TUBE-5-M",
+    "desc": "WIP, 7113-500009 (.280)",
+    "longitud": 280
+  },
+  {
+    "item": "102101-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.275)",
+    "longitud": 275
+  },
+  {
+    "item": "030-4060-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.270)",
+    "longitud": 270
+  },
+  {
+    "item": "234-4669-TUBE1",
+    "desc": "WIP, 7113-500009 (.265)",
+    "longitud": 265
+  },
+  {
+    "item": "414-8260-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.265)",
+    "longitud": 265
+  },
+  {
+    "item": "130-7130-3-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.260)",
+    "longitud": 260
+  },
+  {
+    "item": "414-8120-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.255)",
+    "longitud": 255
+  },
+  {
+    "item": "234-4668-TUBE1",
+    "desc": "WIP, 7113-500009 (.255)",
+    "longitud": 255
+  },
+  {
+    "item": "414-8120-A-T--TUBE-M",
+    "desc": "WIP, 7113-500009 (.255)",
+    "longitud": 255
+  },
+  {
+    "item": "030-3050-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.250)",
+    "longitud": 250
+  },
+  {
+    "item": "102101-TUBE4-2-M",
+    "desc": "WIP, 7113-500009 (.245)",
+    "longitud": 245
+  },
+  {
+    "item": "102101-TUBE1-35-M",
+    "desc": "WIP, 7113-500009 (.245)",
+    "longitud": 245
+  },
+  {
+    "item": "102101-TUBE1-25-M",
+    "desc": "WIP, 7113-500009 (.245)",
+    "longitud": 245
+  },
+  {
+    "item": "030-6690-TUBE1",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "030-0690-TUBE",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "030-6690-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "130-7880-TUBE-M",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "030-3080-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "130-7910-A-TUBE1",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "130-7910-A-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "102104-TUBE-14-M",
+    "desc": "WIP, 7113-500009 (.240)",
+    "longitud": 240
+  },
+  {
+    "item": "030-2760-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.235)",
+    "longitud": 235
+  },
+  {
+    "item": "530-0202-1-TUBE-M",
+    "desc": "WIP, 7113-500009 (.230)",
+    "longitud": 230
+  },
+  {
+    "item": "030-1570-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.230)",
+    "longitud": 230
+  },
+  {
+    "item": "230-1161-1-TUBE-M",
+    "desc": "WIP, TUBE 7113-500009 (.230)",
+    "longitud": 230
+  },
+  {
+    "item": "414-8070-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.225)",
+    "longitud": 225
+  },
+  {
+    "item": "030-5130-TUBE1",
+    "desc": "WIP, 7113-500009 (.225)",
+    "longitud": 225
+  },
+  {
+    "item": "030-1750-A-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.225)",
+    "longitud": 225
+  },
+  {
+    "item": "5100-TUBE",
+    "desc": "WIP, 7113-500009 (.220)",
+    "longitud": 220
+  },
+  {
+    "item": "102104-TUBE-11-M",
+    "desc": "WIP, 7113-500009 (.220)",
+    "longitud": 220
+  },
+  {
+    "item": "030-2080-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.220)",
+    "longitud": 220
+  },
+  {
+    "item": "414-8040-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.215)",
+    "longitud": 215
+  },
+  {
+    "item": "230-2290-TUBE-M",
+    "desc": "WIP, 7113-500009 (.213)",
+    "longitud": 213
+  },
+  {
+    "item": "102101-TUBE1-89-M",
+    "desc": "WIP, 7113-500009 (.210)",
+    "longitud": 210
+  },
+  {
+    "item": "5120-TUBE",
+    "desc": "WIP, 7113-500009 (.210)",
+    "longitud": 210
+  },
+  {
+    "item": "102104-TUBE-13-M",
+    "desc": "WIP, 7113-500009 (.210)",
+    "longitud": 210
+  },
+  {
+    "item": "130-7070-2-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.210)",
+    "longitud": 210
+  },
+  {
+    "item": "414-8010-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.205)",
+    "longitud": 205
+  },
+  {
+    "item": "030-5060-TUBE",
+    "desc": "WIP, 7113-500009 (.200)",
+    "longitud": 200
+  },
+  {
+    "item": "030-2100-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.200)",
+    "longitud": 200
+  },
+  {
+    "item": "9-1347-TUBE1",
+    "desc": "WIP, 7113-500009 (.200)",
+    "longitud": 200
+  },
+  {
+    "item": "102104-TUBE-8-M",
+    "desc": "WIP, 7113-500009 (.200)",
+    "longitud": 200
+  },
+  {
+    "item": "102101-TUBE1-27-M",
+    "desc": "WIP, 7113-500009 (.195)",
+    "longitud": 195
+  },
+  {
+    "item": "030-1540-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.190)",
+    "longitud": 190
+  },
+  {
+    "item": "030-3401-1-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.190)",
+    "longitud": 190
+  },
+  {
+    "item": "030-1750-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.190)",
+    "longitud": 190
+  },
+  {
+    "item": "030-3720-1-R-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.185)",
+    "longitud": 185
+  },
+  {
+    "item": "030-1170-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.180)",
+    "longitud": 180
+  },
+  {
+    "item": "030-2710-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.175)",
+    "longitud": 175
+  },
+  {
+    "item": "030-2630-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.170)",
+    "longitud": 170
+  },
+  {
+    "item": "030-2890-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.165)",
+    "longitud": 165
+  },
+  {
+    "item": "030-5150-1-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.160)",
+    "longitud": 160
+  },
+  {
+    "item": "102101-TUBE1-39-M",
+    "desc": "WIP, 7113-500009 (.155)",
+    "longitud": 155
+  },
+  {
+    "item": "030-1300-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.150)",
+    "longitud": 150
+  },
+  {
+    "item": "030-1310-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.150)",
+    "longitud": 150
+  },
+  {
+    "item": "414-8060-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.145)",
+    "longitud": 145
+  },
+  {
+    "item": "5090-TUBE",
+    "desc": "WIP, 7113-500009 (.140)",
+    "longitud": 140
+  },
+  {
+    "item": "5090-TUBE-M",
+    "desc": "WIP, 7113-500009 (.140)",
+    "longitud": 140
+  },
+  {
+    "item": "030-1830-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.140)",
+    "longitud": 140
+  },
+  {
+    "item": "102104-TUBE-10-M",
+    "desc": "WIP, 7113-500009 (.140)",
+    "longitud": 140
+  },
+  {
+    "item": "414-8000-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.135)",
+    "longitud": 135
+  },
+  {
+    "item": "030-5960-2-R-T-TUBE1",
+    "desc": "WIP, 7113-500009 (.135)",
+    "longitud": 135
+  },
+  {
+    "item": "030-2140-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.130)",
+    "longitud": 130
+  },
+  {
+    "item": "102101-TUBE1-11-M",
+    "desc": "7113-500009 (.125)",
+    "longitud": 125
+  },
+  {
+    "item": "130-7170-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.125)",
+    "longitud": 125
+  },
+  {
+    "item": "130-7310-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.125)",
+    "longitud": 125
+  },
+  {
+    "item": "030-3401-1-T-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.120)",
+    "longitud": 120
+  },
+  {
+    "item": "234-4260-TUBE1",
+    "desc": "WIP, 7113-500009 (.120)",
+    "longitud": 120
+  },
+  {
+    "item": "234-4260-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.120)",
+    "longitud": 120
+  },
+  {
+    "item": "102104-TUBE-6-M",
+    "desc": "WIP, 7113-500009 (.120)",
+    "longitud": 120
+  },
+  {
+    "item": "030-2210-1-A-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.115)",
+    "longitud": 115
+  },
+  {
+    "item": "230-4853-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.110)",
+    "longitud": 110
+  },
+  {
+    "item": "234-4797-TUBE2",
+    "desc": "WIP, 7113-500009 (.100)",
+    "longitud": 100
+  },
+  {
+    "item": "234-4797-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.100)",
+    "longitud": 100
+  },
+  {
+    "item": "030-3830-A-T-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.100)",
+    "longitud": 100
+  },
+  {
+    "item": "530-7010-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.096)",
+    "longitud": 96
+  },
+  {
+    "item": "104101-TUBE2-3-M",
+    "desc": "WIP, 7113-500009 (.090)",
+    "longitud": 90
+  },
+  {
+    "item": "6650-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.090)",
+    "longitud": 90
+  },
+  {
+    "item": "080-0660-TUBE-M",
+    "desc": "WIP, 7113-500009 (.090)",
+    "longitud": 90
+  },
+  {
+    "item": "6650-TUBE2",
+    "desc": "WIP, 7113-500009 (.090)",
+    "longitud": 90
+  },
+  {
+    "item": "030-1740-1-A-T-TUBE2-M",
+    "desc": "WIP, 7113-500009 (.090)",
+    "longitud": 90
+  },
+  {
+    "item": "030-2012-1-A-T-TUBE-M",
+    "desc": "WIP, 7113-500009 (.080)",
+    "longitud": 80
+  },
+  {
+    "item": "102101-TUBE2-2-M",
+    "desc": "WIP, 7113-500009 (.075)",
+    "longitud": 75
+  },
+  {
+    "item": "102101-TUBE3-2-M",
+    "desc": "WIP, 7113-500009 (.075)",
+    "longitud": 75
+  },
+  {
+    "item": "102101-TUBE1-7-M",
+    "desc": "7113-500009 (.070)",
+    "longitud": 70
+  },
+  {
+    "item": "102101-TUBE1-3-M",
+    "desc": "WIP, 7113-500009 (.060)",
+    "longitud": 60
+  },
+  {
+    "item": "030-1740-1-A-T-TUBE1-M",
+    "desc": "WIP, 7113-500009 (.050)",
+    "longitud": 50
+  }
+]

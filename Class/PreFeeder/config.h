@@ -19,7 +19,6 @@
 #define PF_STA_IP_1 10
 #define PF_STA_IP_2 32
 #define PF_STA_IP_3 102
-constexpr uint16_t PF_SERVO_ACTIVE_US = 2000;
 #define PF_HOSTNAME "prefeeder-R"
 #else
 #define PF_SIDE_TAG "L"
@@ -27,7 +26,6 @@ constexpr uint16_t PF_SERVO_ACTIVE_US = 2000;
 #define PF_STA_IP_1 10
 #define PF_STA_IP_2 32
 #define PF_STA_IP_3 101
-constexpr uint16_t PF_SERVO_ACTIVE_US = 800;
 #define PF_HOSTNAME "prefeeder-L"
 #endif
 
@@ -46,11 +44,12 @@ static const char* const WIFI_PASS = "TCM2026!r&d";
 
 // GPIO. Buffer y DeReeler quedan fuera de este firmware.
 constexpr uint8_t PIN_CYLINDER = 25;
-constexpr uint8_t PIN_HOSE = 27;          // HIGH = manguera/cinta ausente
 constexpr int PIN_FEEDER_STEP = 18;
+constexpr int PIN_PULLER_STEP = 32;      // MotorPuller (distinto de FeedMotor)
 constexpr uint8_t PIN_HOLGURA = 22;       // HIGH = holgura OK (ON)
 constexpr uint8_t HOLGURA_ON_LEVEL = HIGH;
-constexpr uint8_t PIN_SERVO = 26;
+constexpr uint8_t PIN_LIMIT = 34;
+constexpr uint8_t LIMIT_ACTIVE_LEVEL = HIGH;  // activo = falla
 
 // Botón físico JOG - L / JOG - R (según PF_SIDE_TAG). Activo en LOW.
 // Solo cambia este número de GPIO para cablear otro pin.
@@ -58,23 +57,20 @@ constexpr uint8_t PIN_JOG = 33;
 constexpr uint8_t JOG_ACTIVE_LEVEL = LOW;
 constexpr uint32_t JOG_STABLE_MS = 20;
 
-constexpr uint16_t SERVO_MIN_US = 500;
-constexpr uint16_t SERVO_MAX_US = 2500;
-constexpr uint16_t SERVO_NEUTRAL_US = 1500;
-constexpr uint8_t SERVO_LEDC_CH = 7;
-constexpr uint8_t SERVO_LEDC_BITS = 14;
-
-// FeedMotor. El maestro puede reemplazar FEED_RPM en marcha.
+// FeedMotor / MotorPuller. El maestro puede reemplazar FEED_RPM / PULLER_RPM en marcha.
 constexpr uint16_t MOTOR_MICROSTEP = 16;
 constexpr float MOTOR_ACCEL = 3000.0f;
 constexpr float MOTOR_DECEL = 3000.0f;
 constexpr float RPM_MIN = 1.0f;
 constexpr float RPM_MAX = 600.0f;
 constexpr float FEED_RPM = 60.0f;
+constexpr float PULLER_RPM = 60.0f;
 
 // SensorMonitor
 constexpr uint32_t HOLGURA_ON_STABLE_MS = 50;
 constexpr uint32_t HOLGURA_OFF_STABLE_MS = 100;
+constexpr uint32_t LIMIT_ON_STABLE_MS = 50;
+constexpr uint32_t LIMIT_OFF_STABLE_MS = 50;
 
 // FeedingMode. Valores hasta que el maestro manda los suyos.
 constexpr uint16_t HOLGURA_SETTLE_MS = 150;

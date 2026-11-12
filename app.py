@@ -412,6 +412,13 @@ _MACHINE_STATE = {
     # Tras cualquier error: Reset → purga → Reanudar reintenta la pieza desde el paso 1
     # (el lote y cycles_done se conservan; no se cuenta ni se descarta la pieza).
     "post_error_purga": False,
+    # Flujo guiado de recuperación (popup): error → reset → piezas → manguera → purga → listo.
+    "recovery": {
+        "active": False,
+        "step": "",
+        "code": "",
+        "mensaje": "",
+    },
     "omitir_holgura_l": False,
     "omitir_holgura_r": False,
     "ciclos_mant": 0,
@@ -517,29 +524,29 @@ def _canonical_prefeeder_side(src: dict, side: str) -> dict:
     defaults = {
         "L": {
             "rpm": 60.0,
+            "puller_rpm": 60.0,
             "settle_ms": 150,
             "on_s": 2.0,
             "off_fault_s": 5.0,
             "stall_fault_s": 2.0,
-            "servo_us": 800,
         },
         "R": {
             "rpm": 60.0,
+            "puller_rpm": 60.0,
             "settle_ms": 150,
             "on_s": 2.0,
             "off_fault_s": 5.0,
             "stall_fault_s": 2.0,
-            "servo_us": 2000,
         },
     }[side]
     block = src.get(side) if isinstance(src.get(side), dict) else {}
     return {
         "rpm": _as_float(block, ("rpm",), defaults["rpm"]),
+        "puller_rpm": _as_float(block, ("puller_rpm",), defaults["puller_rpm"]),
         "settle_ms": _as_int(block, ("settle_ms",), defaults["settle_ms"]),
         "on_s": _as_float(block, ("on_s",), defaults["on_s"]),
         "off_fault_s": _as_float(block, ("off_fault_s",), defaults["off_fault_s"]),
         "stall_fault_s": _as_float(block, ("stall_fault_s",), defaults["stall_fault_s"]),
-        "servo_us": _as_int(block, ("servo_us",), defaults["servo_us"]),
     }
 
 
@@ -573,11 +580,11 @@ def _prefeeder_cfg_signature(side_cfg: dict) -> tuple:
     c = side_cfg
     return (
         round(c["rpm"], 2),
+        round(c["puller_rpm"], 2),
         c["settle_ms"],
         round(c["on_s"], 3),
         round(c["off_fault_s"], 3),
         round(c["stall_fault_s"], 3),
-        c["servo_us"],
     )
 
 
@@ -1423,6 +1430,13 @@ _PF_ERROR_LATCH = False
 _PF_STABILIZE_TIMEOUT_S = 45.0
 _PF_SERIAL_REPLY_S = 6.0
 _PF_SOFT_ERRORS = frozenset({"E090", "E091", "E092", "E099"})
+# Errores de enlace/COM: el Reset de recuperación no puede exigir status del módulo caído.
+_RECOVERY_LINK_SOFT_RESET = frozenset({
+    "E017", "E018", "E019",
+    "E041", "E042", "E043",
+    "E070", "E071", "E072",
+    "E090", "E091", "E092",
+})
 _PF_MANUAL_HOLD = {"L": False, "R": False}
 _PF_MANUAL_HOLD_LOCK = threading.Lock()
 _PF_UI_REFRESH_AT = 0.0
@@ -1935,6 +1949,56 @@ def _machine_fault_message(codes: tuple[str, ...]) -> tuple[str, str]:
     return primary, msg
 
 
+def _recovery_blank() -> dict:
+    return {
+        "active": False,
+        "step": "",
+        "code": "",
+        "mensaje": "",
+    }
+
+
+def _recovery_get() -> dict:
+    with _STATE_LOCK:
+        rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+    for key, default in _recovery_blank().items():
+        rec.setdefault(key, default)
+    return rec
+
+
+def _recovery_set(**fields) -> None:
+    with _STATE_LOCK:
+        rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+        rec.update(fields)
+        _MACHINE_STATE["recovery"] = rec
+
+
+def _recovery_begin(code: str, msg: str) -> None:
+    _recovery_set(
+        active=True,
+        step="error",
+        code=str(code or "").strip(),
+        mensaje=str(msg or "").strip(),
+    )
+
+
+def _recovery_clear() -> None:
+    with _STATE_LOCK:
+        _MACHINE_STATE["recovery"] = _recovery_blank()
+
+
+def _recovery_cutters_clear_now() -> bool:
+    """True si ambos cortadores estan apagados (válvula y sensor de falla)."""
+    st = _plc_status_get()
+    if st is None:
+        return False
+    if st.get("cutter_r") is True or st.get("cutter_l") is True:
+        return False
+    if st.get("fault_cutter") is True or st.get("sens_cutter") is True:
+        return False
+    return True
+
+
 def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None) -> None:
     """Un solo evento al entrar en error; luego solo actualiza el banner."""
     with _STATE_LOCK:
@@ -1944,12 +2008,19 @@ def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None
     if in_error:
         with _STATE_LOCK:
             stale = _MACHINE_STATE.get("mensaje") != msg or _MACHINE_STATE.get("ciclo_error") != primary
+            if stale:
+                rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+                if rec.get("active") and rec.get("step") == "error":
+                    rec["code"] = str(primary or "").strip()
+                    rec["mensaje"] = str(msg or "").strip()
+                    _MACHINE_STATE["recovery"] = rec
         if stale:
             _set_machine_ui(mensaje=msg, ciclo_error=primary)
         return
     _push_event(msg, "error")
     with _STATE_LOCK:
         _MACHINE_STATE["post_error_purga"] = True
+    _recovery_begin(primary, msg)
     _set_machine_ui(
         estado="error",
         estado_label="Error",
@@ -2153,7 +2224,7 @@ def _prefeeder_process_halt_async(*, stabilize: bool = True) -> None:
 
 
 def _prefeeder_fault_clear_now() -> bool:
-    """Fallas de campo (cilindro/manguera/holgura). Sin status ≠ falla activa."""
+    """Fallas de campo (cilindro/holgura). Sin status ≠ falla activa."""
     if not _prefeeder_required():
         return True
     st = _prefeeder_refresh_cache() or _PF_CACHED_STATUS
@@ -2925,6 +2996,7 @@ def _public_machine_state() -> dict:
         omit_l = bool(_MACHINE_STATE.get("omitir_holgura_l"))
         omit_r = bool(_MACHINE_STATE.get("omitir_holgura_r"))
         state["ciclo_paso_a_paso"] = bool(_CYCLE_CTRL.get("step_mode"))
+        state["recovery"] = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
     # Efectivo = manual + auto (lado contrario a feed_sides).
     omit_l, omit_r = _holgura_omit_effective(
         state.get("feed_sides"), omit_l=omit_l, omit_r=omit_r
@@ -3362,6 +3434,10 @@ def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
                 estado_label="Error",
                 en_curso=True,
             )
+        # Si el error quedó sin popup de recuperación, abrirlo.
+        if not _recovery_get().get("active"):
+            existing = str(_MACHINE_STATE.get("ciclo_error") or code or "").strip()
+            _recovery_begin(existing, str(_MACHINE_STATE.get("mensaje") or msg))
         return
     if not in_error:
         _push_event(msg, "error")
@@ -3372,6 +3448,7 @@ def _cycle_fail(code: str, *, mensaje: str | None = None, **fmt) -> None:
         freeze_s = round(max(0.0, time.time() - _PIECE_TICK0), 1)
     with _STATE_LOCK:
         _MACHINE_STATE["post_error_purga"] = True
+    _recovery_begin(code, msg)
     _set_machine_ui(
         estado="error",
         estado_label="Error",
@@ -4872,6 +4949,7 @@ def _cycle_stop_idle(mensaje: str = "Stop — ciclo detenido. Listo para Iniciar
     _cycle_latch_reset()
     with _STATE_LOCK:
         _MACHINE_STATE["post_error_purga"] = False
+        _MACHINE_STATE["recovery"] = _recovery_blank()
     _set_machine_ui(
         estado="idle",
         estado_label="En espera",
@@ -4965,45 +5043,69 @@ def _cycle_reset_error() -> tuple[bool, str]:
     with _STATE_LOCK:
         code = str(_MACHINE_STATE.get("ciclo_error") or "").strip()
         in_err = _MACHINE_STATE.get("estado") == "error" or bool(code)
+        msg_now = str(_MACHINE_STATE.get("mensaje") or "")
     if not in_err:
         return True, ""
-    # Pulso GPIO Reset PLC (borrar fallos) antes de validar condiciones físicas.
-    if _serial_port("plc"):
-        sent = _cycle_plc_send({"op": "reset"})
-        if not sent.get("sent"):
-            return False, error_codes.format_message(sent.get("code") or "E019")
-        _plc_wait_ready(1.5)
-
-    def _finish_reset_to_purge(keep: bool) -> tuple[bool, str]:
-        # Ruta especial: tras Reset la purga es obligatoria antes de Reanudar/Start.
-        # El reset PLC apaga válvulas lógicas: termina la retención de pinzas.
-        _gripper_holding_set(False)
-        with _STATE_LOCK:
-            _MACHINE_STATE["post_error_purga"] = True
-        msg = (
-            "Error limpiado. Completa la purga; al reanudar se reintenta la pieza desde el paso 1."
-            if keep
-            else "Error limpiado. Completa la purga para operar."
-        )
-        _set_machine_ui(
-            estado="paused" if keep else "idle",
-            estado_label="Purga pendiente",
-            ciclo_error="",
-            mensaje=msg,
-            en_curso=keep,
-        )
-        _push_event("Reset — PLC fallos borrados; completa la purga.")
-        return True, ""
-
-    if not code and _MACHINE_STATE.get("estado") == "error":
-        _pf_last_fault_sig = ()
-        _PF_ERROR_LATCH = False
-        keep = bool(
+    def _keep_lot() -> bool:
+        return bool(
             _MACHINE_STATE.get("ciclo_en_curso")
             or _LOT.get("active")
             or _LOT.get("tray_wait")
         )
-        return _finish_reset_to_purge(keep)
+
+    def _finish_reset_to_purge(keep: bool) -> tuple[bool, str]:
+        # Ruta especial: tras Reset la purga es obligatoria antes de Reanudar/Start.
+        # El reset PLC apaga válvulas lógicas: libera holder/pinzas (suelta la pieza).
+        _gripper_holding_set(False)
+        with _STATE_LOCK:
+            _MACHINE_STATE["post_error_purga"] = True
+            rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+            if rec.get("active"):
+                rec["step"] = "piezas"
+                rec["code"] = str(rec.get("code") or code or "").strip()
+                if not rec.get("mensaje"):
+                    rec["mensaje"] = msg_now
+                _MACHINE_STATE["recovery"] = rec
+            else:
+                prev = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+                _MACHINE_STATE["recovery"] = {
+                    "active": True,
+                    "step": "piezas",
+                    "code": str(code or "").strip(),
+                    "mensaje": msg_now or str(prev.get("mensaje") or ""),
+                }
+        _set_machine_ui(
+            estado="paused" if keep else "idle",
+            estado_label="Recuperación",
+            ciclo_error="",
+            mensaje="Error limpiado. Confirma las piezas y completa la recuperación.",
+            en_curso=keep,
+        )
+        _push_event("Reset — holder y pieza liberados; sigue la recuperación.")
+        return True, ""
+
+    # Error de COM/enlace: no pedir pulso/status al módulo caído.
+    if (code in _RECOVERY_LINK_SOFT_RESET) or (not code and _MACHINE_STATE.get("estado") == "error"):
+        _pf_last_fault_sig = ()
+        _PF_ERROR_LATCH = False
+        if code in _RECOVERY_LINK_SOFT_RESET:
+            _push_event("Reset — error de enlace limpiado; sigue la recuperación.")
+        return _finish_reset_to_purge(_keep_lot())
+
+    # Pulso GPIO Reset PLC (borrar fallos) antes de validar condiciones físicas.
+    if _serial_port("plc"):
+        sent = _cycle_plc_send({"op": "reset"})
+        if not sent.get("sent"):
+            fail_code = str(sent.get("code") or "E019")
+            # Si el pulso falla por COM, no dejar al operador atrapado.
+            if fail_code in _RECOVERY_LINK_SOFT_RESET:
+                _pf_last_fault_sig = ()
+                _PF_ERROR_LATCH = False
+                _push_event("Reset — sin respuesta PLC; se continúa la recuperación.")
+                return _finish_reset_to_purge(_keep_lot())
+            return False, error_codes.format_message(fail_code)
+        _plc_wait_ready(1.5)
+
     if not _wait_error_physical_clear_stable():
         return False, _error_reset_blocked_message()
     if _prefeeder_required():
@@ -5425,6 +5527,10 @@ def _purga_finish(cancelled: bool) -> None:
         if recovery:
             with _STATE_LOCK:
                 _MACHINE_STATE["post_error_purga"] = False
+                rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
+                if rec.get("active"):
+                    rec["step"] = "listo"
+                    _MACHINE_STATE["recovery"] = rec
             if keep:
                 if _LOT.get("tray_wait"):
                     deposits = int(_LOT.get("deposits_per_tray") or 0)
@@ -5444,20 +5550,19 @@ def _purga_finish(cancelled: bool) -> None:
                         piece = int(_LOT.get("cycles_done") or 0) + 1
                         total = int(_LOT.get("cycles_total") or 0)
                         rearm_msg = (
-                            f"Purga terminada. Pieza {piece} de {total} se reintenta "
-                            "desde el paso 1. Reanudar para continuar el lote."
+                            f"Listo. Pieza {piece} de {total} se reintenta desde el inicio. "
+                            "Puedes Reanudar."
                         )
                     else:
                         rearm_msg = (
-                            "Purga terminada. La pieza se reintenta desde el paso 1. "
-                            "Reanudar para continuar."
+                            "Listo. La pieza se reintenta desde el inicio. Puedes Reanudar."
                         )
                     _rearm_piece(rearm_msg)
             else:
                 _set_machine_ui(
                     estado="idle",
                     estado_label="En espera",
-                    mensaje="Purga terminada. Listo para operar.",
+                    mensaje="Listo para operar.",
                     en_curso=False,
                 )
             return
@@ -6149,6 +6254,115 @@ def _purga_alimentar_action(data=None) -> tuple[bool, str]:
     return True, "Alimentando."
 
 
+def _recovery_confirm_piezas(_data=None) -> tuple[bool, str]:
+    rec = _recovery_get()
+    if not rec.get("active"):
+        return False, "No hay una recuperación en curso."
+    if rec.get("step") != "piezas":
+        return False, "Primero limpia el error con Reset."
+    if _MACHINE_STATE.get("estado") == "error" or _MACHINE_STATE.get("ciclo_error"):
+        return False, "Todavía hay un error activo. Pulsa Reset."
+    _recovery_set(step="manguera")
+    _set_machine_ui(
+        mensaje="Mueve la manguera hacia atrás hasta apagar ambos cortadores.",
+        estado_label="Recuperación",
+    )
+    return True, "Confirma la manguera."
+
+
+def _recovery_auto_purga_run() -> None:
+    """Purga automática post-error: parque + corte (reusa _purge_cut / _purga_finish)."""
+    _ROUTINE["from_lote"] = False
+    _recovery_set(step="purga")
+    _set_routine_ui(
+        rutina="purga",
+        rutina_fase="segura",
+        rutina_manos=True,
+        estado_label="Purga",
+        mensaje="NO INTRODUCIR MANOS. Proceso de limpieza en curso, espera.",
+    )
+    _set_machine_ui(mensaje="NO INTRODUCIR MANOS. Proceso de limpieza en curso, espera.")
+    # Tiempo para leer el aviso antes de mover.
+    if not _routine_sleep_ms(500):
+        _purga_finish(True)
+        _recovery_set(step="manguera")
+        return
+    if not _routine_try_reset_fault() or _ROUTINE["stop"].is_set():
+        _purga_finish(True)
+        _recovery_set(step="manguera")
+        return
+    if not _cycle_plc_send({"op": "all_off"}).get("sent"):
+        _purga_finish(True)
+        _recovery_set(step="manguera")
+        return
+    _gripper_holding_set(False)
+    _set_routine_ui(
+        mensaje=f"NO METAS LAS MANOS. Llevando el eje a parque ({PURGE_PARK_MM:.0f} mm).",
+    )
+    if _ROUTINE["stop"].is_set() or not _routine_move_lm_mm(PURGE_PARK_MM):
+        _purga_finish(True)
+        _recovery_set(step="manguera")
+        return
+    ok = False
+    try:
+        ok = _purge_cut()
+    finally:
+        if not ok or _ROUTINE["stop"].is_set():
+            _cycle_plc_send({"op": "all_off"})
+            _purga_finish(True)
+            _recovery_set(step="manguera")
+        else:
+            _purga_finish(False)
+
+
+def _recovery_confirm_manguera(_data=None) -> tuple[bool, str]:
+    rec = _recovery_get()
+    if not rec.get("active"):
+        return False, "No hay una recuperación en curso."
+    if rec.get("step") != "manguera":
+        return False, "Primero confirma que las piezas están bien."
+    if _MACHINE_STATE.get("estado") == "error" or _MACHINE_STATE.get("ciclo_error"):
+        return False, "Todavía hay un error activo."
+    if _MACHINE_STATE.get("rutina") == "purga":
+        return False, "Ya hay una purga en curso."
+    if not _recovery_cutters_clear_now():
+        return False, "Los cortadores aún no están apagados. Mueve la manguera hacia atrás."
+    ready, err = _require_links()
+    if not ready:
+        return False, err
+    # Mostrar el aviso en el popup de inmediato; la rutina espera 500 ms para leer.
+    _recovery_set(step="purga")
+    _set_routine_ui(
+        rutina="purga",
+        rutina_fase="segura",
+        rutina_manos=True,
+        estado_label="Purga",
+        mensaje="NO INTRODUCIR MANOS. Proceso de limpieza en curso, espera.",
+    )
+    _set_machine_ui(mensaje="NO INTRODUCIR MANOS. Proceso de limpieza en curso, espera.")
+    ok, err = _start_routine(_recovery_auto_purga_run)
+    if not ok:
+        _set_routine_ui(rutina="", rutina_fase="", rutina_manos=False)
+        _recovery_set(step="manguera")
+        return False, err
+    return True, "Purga automática iniciada."
+
+
+def _recovery_done(_data=None) -> tuple[bool, str]:
+    rec = _recovery_get()
+    if not rec.get("active"):
+        return True, ""
+    if rec.get("step") == "purga" or _MACHINE_STATE.get("rutina") == "purga":
+        return False, "Espera a que termine la purga."
+    if rec.get("step") not in ("listo", "piezas", "manguera", "error"):
+        return False, "La recuperación aún no termina."
+    if rec.get("step") != "listo":
+        # Salir del popup está permitido; no borra la recuperación pendiente.
+        return True, "Puedes volver cuando quieras."
+    _recovery_clear()
+    return True, "Listo."
+
+
 _ROUTINE_ACTIONS = {
     "purga": _purga_start,
     "purga_alimentar": _purga_alimentar_action,
@@ -6173,6 +6387,9 @@ _ROUTINE_ACTIONS = {
     "checklist_medicion": _checklist_medicion,
     "mantenimiento_reset": _mant_reset,
     "charola_vacia": _charola_vacia,
+    "recovery_confirm_piezas": _recovery_confirm_piezas,
+    "recovery_confirm_manguera": _recovery_confirm_manguera,
+    "recovery_done": _recovery_done,
 }
 
 _mant_load()
@@ -6864,17 +7081,28 @@ def _action_rejected(err: str):
     """El rechazo queda en el letrero. El panel de eventos puede estar cerrado."""
     if err:
         _push_event(err, "error")
-        head = (err.split(maxsplit=1)[0] if err else "") or ""
-        if len(head) >= 4 and head[0] == "E" and head[1:].isdigit():
-            code = head
-            _set_machine_ui(
-                estado="error",
-                estado_label="Error",
-                mensaje=err,
-                ciclo_error=code,
+        with _STATE_LOCK:
+            already_error = (
+                _MACHINE_STATE.get("estado") == "error"
+                or bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
             )
-        else:
+        # Si ya hay error/recuperación, no relatchear otro código (p. ej. Reset fallido
+        # por COM que devolvía E019 y dejaba al operador atrapado).
+        if already_error:
             _set_machine_ui(mensaje=err)
+        else:
+            head = (err.split(maxsplit=1)[0] if err else "") or ""
+            if len(head) >= 4 and head[0] == "E" and head[1:].isdigit():
+                code = head
+                _recovery_begin(code, err)
+                _set_machine_ui(
+                    estado="error",
+                    estado_label="Error",
+                    mensaje=err,
+                    ciclo_error=code,
+                )
+            else:
+                _set_machine_ui(mensaje=err)
     return jsonify({"ok": False, "error": err, "state": _public_machine_state()}), 400
 
 

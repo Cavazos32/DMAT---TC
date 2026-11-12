@@ -331,11 +331,20 @@ body {
   text-transform: uppercase;
 }
 
+.status-banner__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .status-banner__detail {
   margin: 0;
   font-size: 1rem;
   color: var(--text-muted);
   line-height: 1.45;
+  flex: 1 1 12rem;
 }
 
 .status-banner__detail.is-warn {
@@ -343,6 +352,11 @@ body {
   font-weight: 800;
   letter-spacing: 0.04em;
   font-size: 1.15rem;
+}
+
+.status-banner__open-error {
+  flex: 0 0 auto;
+  min-width: 8.5rem;
 }
 
 .status-banner__actions {
@@ -1646,6 +1660,161 @@ body {
   margin: 0 0 1rem;
   font-size: 0.9rem;
   color: var(--text-muted);
+}
+
+.modal--recovery {
+  width: min(28rem, 94vw);
+}
+
+.recovery-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.recovery-step {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.recovery-lead {
+  margin: 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.recovery-code {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.recovery-text {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.recovery-text__label {
+  display: inline;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.modal--recovery.is-hands-warn {
+  border: 2px solid var(--stop);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
+}
+
+.recovery-lead.is-hands-warn {
+  color: var(--stop);
+  font-size: 1.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.recovery-text.is-hands-warn {
+  color: var(--text);
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.recovery-text.is-hands-warn .recovery-text__label {
+  color: var(--text);
+}
+
+.recovery-sensors {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.recovery-sensors[hidden] {
+  display: none !important;
+}
+
+.recovery-error-box {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+}
+
+.recovery-error-box__code {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--error);
+}
+
+.recovery-error-box__desc {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.recovery-sensor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-elevated);
+}
+
+.recovery-sensor__name {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.recovery-sensor__state {
+  font-size: 1rem;
+  font-weight: 800;
+  min-width: 5.5rem;
+  text-align: center;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+}
+
+.recovery-sensor__state.is-on {
+  color: #fff;
+  background: var(--stop);
+}
+
+.recovery-sensor__state.is-off {
+  color: #fff;
+  background: var(--start);
+}
+
+.recovery-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.recovery-actions .btn {
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1.05rem;
+  font-weight: 800;
 }
 
 .modal-field {

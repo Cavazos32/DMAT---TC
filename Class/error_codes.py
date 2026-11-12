@@ -59,10 +59,16 @@ CATALOG: dict[str, tuple[str, str]] = {
     "E091": ("PreAlimentador", "El COM seleccionado no es el maestro PreAlimentador."),
     "E092": ("PreAlimentador", "El COM no respondió. Revisa el cable, la placa o cierra el monitor serial."),
     "E093": ("PreAlimentador", "Falla de cilindro en el lado L."),
-    "E094": ("PreAlimentador", "Falla de manguera en el lado L."),
+    "E094": (
+        "PreAlimentador",
+        "Sensor límite L activo. Revisa el PreAlimentador y deja holgura adecuada para trabajar. Puedes usar JOG L (HMI o botón) para reposicionar.",
+    ),
     "E095": ("PreAlimentador", "Falla de holgura en el lado L."),
     "E096": ("PreAlimentador", "Falla de cilindro en el lado R."),
-    "E097": ("PreAlimentador", "Falla de manguera en el lado R."),
+    "E097": (
+        "PreAlimentador",
+        "Sensor límite R activo. Revisa el PreAlimentador y deja holgura adecuada para trabajar. Puedes usar JOG R (HMI o botón) para reposicionar.",
+    ),
     "E098": ("PreAlimentador", "Falla de holgura en el lado R."),
     "E099": ("PreAlimentador", "No está listo ni estabilizado (usa Iniciar o revisa fallas)."),
 }
@@ -94,11 +100,11 @@ PLC_FAULT_FIELDS: tuple[tuple[str, str], ...] = (
 # fault numérico del firmware PreFeeder (ErrorCode.h) por lado
 PFEEDER_FAULT_MAP: dict[tuple[str, int], str] = {
     ("L", 3): "E093",
-    ("L", 4): "E094",
     ("L", 6): "E095",
+    ("L", 7): "E094",
     ("R", 3): "E096",
-    ("R", 4): "E097",
     ("R", 6): "E098",
+    ("R", 7): "E097",
 }
 
 

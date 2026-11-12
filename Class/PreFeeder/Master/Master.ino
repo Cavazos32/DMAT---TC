@@ -16,8 +16,8 @@ struct SideLive {
   uint8_t fault = FAULT_NONE;
   char state[8] = "idle";
   bool cylinder = false;
-  bool hose = false;
   bool holgura = false;
+  bool limit = false;
   bool omitHolgura = false;
   bool forceFeed = false;
 };
@@ -69,6 +69,8 @@ static void wifiPoll() {
 static void clampSide(PfSideParams& p) {
   if (p.rpm < 1.0f) p.rpm = 1.0f;
   if (p.rpm > 600.0f) p.rpm = 600.0f;
+  if (p.pullerRpm < 1.0f) p.pullerRpm = 1.0f;
+  if (p.pullerRpm > 600.0f) p.pullerRpm = 600.0f;
   if (p.settleMs < 10) p.settleMs = 10;
   if (p.settleMs > 500) p.settleMs = 500;
   if (p.onSec < 0.1f) p.onSec = 0.1f;
@@ -77,8 +79,6 @@ static void clampSide(PfSideParams& p) {
   if (p.offFaultSec > 300.0f) p.offFaultSec = 300.0f;
   if (p.stallFaultSec < 0.5f) p.stallFaultSec = 0.5f;
   if (p.stallFaultSec > 60.0f) p.stallFaultSec = 60.0f;
-  if (p.servoUs < 500) p.servoUs = 500;
-  if (p.servoUs > 2500) p.servoUs = 2500;
 }
 
 static bool jsonNum(const String& j, const char* key, float& out) {
@@ -117,6 +117,8 @@ static void appendFloat(String& j, float v, uint8_t dec) {
 static void appendCfg(String& j, const PfSideParams& c) {
   j += "\"cfg\":{\"rpm\":";
   appendFloat(j, c.rpm, 1);
+  j += ",\"puller_rpm\":";
+  appendFloat(j, c.pullerRpm, 1);
   j += ",\"settle_ms\":";
   j += String(c.settleMs);
   j += ",\"on_s\":";
@@ -125,8 +127,6 @@ static void appendCfg(String& j, const PfSideParams& c) {
   appendFloat(j, c.offFaultSec, 2);
   j += ",\"stall_fault_s\":";
   appendFloat(j, c.stallFaultSec, 2);
-  j += ",\"servo_us\":";
-  j += String(c.servoUs);
   j += "}";
 }
 
@@ -195,10 +195,10 @@ static void appendSide(String& j, const char* name, const SideLive& s, uint32_t 
   j += pfFaultName(fault);
   j += "\",\"sensors\":{\"cylinder\":";
   j += s.cylinder ? "true" : "false";
-  j += ",\"hose\":";
-  j += s.hose ? "true" : "false";
   j += ",\"holgura\":";
   j += s.holgura ? "true" : "false";
+  j += ",\"limit\":";
+  j += s.limit ? "true" : "false";
   j += "},";
   appendCfg(j, s.cfg);
   j += ",\"omit_holgura\":";
@@ -244,15 +244,17 @@ static void sendStatus() {
 }
 
 static bool cfgSame(const PfSideParams& a, const PfSideParams& b) {
-  return a.rpm == b.rpm && a.settleMs == b.settleMs && a.onSec == b.onSec
-    && a.offFaultSec == b.offFaultSec && a.stallFaultSec == b.stallFaultSec
-    && a.servoUs == b.servoUs;
+  return a.rpm == b.rpm && a.pullerRpm == b.pullerRpm && a.settleMs == b.settleMs
+    && a.onSec == b.onSec && a.offFaultSec == b.offFaultSec
+    && a.stallFaultSec == b.stallFaultSec;
 }
 
 static void cfgLoadNvsSide(char side, PfSideParams& dst) {
   char key[12];
   snprintf(key, sizeof(key), "%c_rpm", side);
   dst.rpm = gPrefs.getFloat(key, dst.rpm);
+  snprintf(key, sizeof(key), "%c_puller", side);
+  dst.pullerRpm = gPrefs.getFloat(key, dst.pullerRpm);
   snprintf(key, sizeof(key), "%c_settle", side);
   dst.settleMs = (uint16_t)gPrefs.getUShort(key, dst.settleMs);
   snprintf(key, sizeof(key), "%c_on", side);
@@ -261,14 +263,14 @@ static void cfgLoadNvsSide(char side, PfSideParams& dst) {
   dst.offFaultSec = gPrefs.getFloat(key, dst.offFaultSec);
   snprintf(key, sizeof(key), "%c_stall", side);
   dst.stallFaultSec = gPrefs.getFloat(key, dst.stallFaultSec);
-  snprintf(key, sizeof(key), "%c_servo", side);
-  dst.servoUs = gPrefs.getUShort(key, dst.servoUs);
 }
 
 static void cfgSaveNvsSide(char side, const PfSideParams& src) {
   char key[12];
   snprintf(key, sizeof(key), "%c_rpm", side);
   gPrefs.putFloat(key, src.rpm);
+  snprintf(key, sizeof(key), "%c_puller", side);
+  gPrefs.putFloat(key, src.pullerRpm);
   snprintf(key, sizeof(key), "%c_settle", side);
   gPrefs.putUShort(key, src.settleMs);
   snprintf(key, sizeof(key), "%c_on", side);
@@ -277,8 +279,6 @@ static void cfgSaveNvsSide(char side, const PfSideParams& src) {
   gPrefs.putFloat(key, src.offFaultSec);
   snprintf(key, sizeof(key), "%c_stall", side);
   gPrefs.putFloat(key, src.stallFaultSec);
-  snprintf(key, sizeof(key), "%c_servo", side);
-  gPrefs.putUShort(key, src.servoUs);
 }
 
 static void cfgLoadNvs() {
@@ -334,12 +334,12 @@ static void handleStatusPost() {
   if (si >= 0) {
     const String sen = body.substring(si);
     if (jsonBool(sen, "cylinder", bit)) live->cylinder = bit;
-    if (jsonBool(sen, "hose", bit)) live->hose = bit;
     if (jsonBool(sen, "holgura", bit)) live->holgura = bit;
+    if (jsonBool(sen, "limit", bit)) live->limit = bit;
   } else {
     if (jsonBool(body, "cylinder", bit)) live->cylinder = bit;
-    if (jsonBool(body, "hose", bit)) live->hose = bit;
     if (jsonBool(body, "holgura", bit)) live->holgura = bit;
+    if (jsonBool(body, "limit", bit)) live->limit = bit;
   }
   const int st = body.indexOf("\"state\":\"");
   if (st >= 0) {
@@ -371,11 +371,11 @@ static bool readCfg(const String& body, PfSideParams& cfg) {
   float v = 0;
   bool any = false;
   if (jsonNum(body, "rpm", v)) { cfg.rpm = v; any = true; }
+  if (jsonNum(body, "puller_rpm", v)) { cfg.pullerRpm = v; any = true; }
   if (jsonNum(body, "settle_ms", v)) { cfg.settleMs = (uint16_t)v; any = true; }
   if (jsonNum(body, "on_s", v)) { cfg.onSec = v; any = true; }
   if (jsonNum(body, "off_fault_s", v)) { cfg.offFaultSec = v; any = true; }
   if (jsonNum(body, "stall_fault_s", v)) { cfg.stallFaultSec = v; any = true; }
-  if (jsonNum(body, "servo_us", v)) { cfg.servoUs = (uint16_t)v; any = true; }
   if (any) clampSide(cfg);
   return any;
 }
@@ -548,8 +548,8 @@ void setup() {
   Serial.println(F("{\"op\":\"boot\",\"mcu\":\"prefeeder\"}"));
   Serial.println("[MASTER] PreFeeder Master boot");
   cfgLoadNvs();
-  Serial.printf("[MASTER] cfg L rpm %.1f servo %u | R rpm %.1f servo %u\n",
-                liveL.cfg.rpm, liveL.cfg.servoUs, liveR.cfg.rpm, liveR.cfg.servoUs);
+  Serial.printf("[MASTER] cfg L rpm %.1f puller %.1f | R rpm %.1f puller %.1f\n",
+                liveL.cfg.rpm, liveL.cfg.pullerRpm, liveR.cfg.rpm, liveR.cfg.pullerRpm);
   wifiStart();
   server.on("/", HTTP_GET, []() {
     server.send(200, "text/plain", "prefeeder-master");

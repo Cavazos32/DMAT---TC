@@ -37,7 +37,10 @@
         <span class="status-banner__dot" id="statusBannerDot"></span>
         <span class="status-banner__label" id="statusBannerLabel">En espera</span>
       </div>
-      <p class="status-banner__detail" id="statusBannerDetail">Sistema listo. Sin errores activos.</p>
+      <div class="status-banner__row">
+        <p class="status-banner__detail" id="statusBannerDetail">Sistema listo. Sin errores activos.</p>
+        <button type="button" class="btn btn-reset status-banner__open-error" id="btnOpenRecovery" hidden>Abrir Error</button>
+      </div>
       <div class="status-banner__actions" id="statusBannerActions" hidden>
         <button type="button" class="btn btn-manual" data-action="purga_alimentar">Alimentar</button>
         <button type="button" class="btn btn-manual" data-action="purga_limpiar">Limpiar</button>
@@ -185,6 +188,7 @@
             <small>Permite iniciar el ciclo sin completar la revisión</small>
           </span>
         </label>
+
       </div>
     </div>
   </div>
@@ -496,14 +500,14 @@
                       <span class="motion-laser__name">Cilindro</span>
                       <span class="motion-laser__state">—</span>
                     </p>
-                    <p class="motion-laser" id="pfHoseL" role="status" aria-label="Manguera L">
-                      <span class="motion-laser__led" aria-hidden="true"></span>
-                      <span class="motion-laser__name">Manguera</span>
-                      <span class="motion-laser__state">—</span>
-                    </p>
                     <p class="motion-laser" id="pfHolgL" role="status" aria-label="Holgura L">
                       <span class="motion-laser__led" aria-hidden="true"></span>
                       <span class="motion-laser__name">Holgura</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfLimL" role="status" aria-label="Límite L">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Límite</span>
                       <span class="motion-laser__state">—</span>
                     </p>
                   </div>
@@ -512,8 +516,8 @@
                   <label class="motion-field">RPM
                     <input type="number" min="1" max="600" step="1" data-pf-side="L" data-pf-key="rpm">
                   </label>
-                  <label class="motion-field">Servo (µs)
-                    <input type="number" min="500" max="2500" step="10" data-pf-side="L" data-pf-key="servo_us">
+                  <label class="motion-field">RPM Puller
+                    <input type="number" min="1" max="600" step="1" data-pf-side="L" data-pf-key="puller_rpm">
                   </label>
                   <label class="motion-field">Asentamiento (ms)
                     <input type="number" min="10" max="500" step="10" data-pf-side="L" data-pf-key="settle_ms">
@@ -540,14 +544,14 @@
                       <span class="motion-laser__name">Cilindro</span>
                       <span class="motion-laser__state">—</span>
                     </p>
-                    <p class="motion-laser" id="pfHoseR" role="status" aria-label="Manguera R">
-                      <span class="motion-laser__led" aria-hidden="true"></span>
-                      <span class="motion-laser__name">Manguera</span>
-                      <span class="motion-laser__state">—</span>
-                    </p>
                     <p class="motion-laser" id="pfHolgR" role="status" aria-label="Holgura R">
                       <span class="motion-laser__led" aria-hidden="true"></span>
                       <span class="motion-laser__name">Holgura</span>
+                      <span class="motion-laser__state">—</span>
+                    </p>
+                    <p class="motion-laser" id="pfLimR" role="status" aria-label="Límite R">
+                      <span class="motion-laser__led" aria-hidden="true"></span>
+                      <span class="motion-laser__name">Límite</span>
                       <span class="motion-laser__state">—</span>
                     </p>
                   </div>
@@ -556,8 +560,8 @@
                   <label class="motion-field">RPM
                     <input type="number" min="1" max="600" step="1" data-pf-side="R" data-pf-key="rpm">
                   </label>
-                  <label class="motion-field">Servo (µs)
-                    <input type="number" min="500" max="2500" step="10" data-pf-side="R" data-pf-key="servo_us">
+                  <label class="motion-field">RPM Puller
+                    <input type="number" min="1" max="600" step="1" data-pf-side="R" data-pf-key="puller_rpm">
                   </label>
                   <label class="motion-field">Asentamiento (ms)
                     <input type="number" min="10" max="500" step="10" data-pf-side="R" data-pf-key="settle_ms">
@@ -658,6 +662,35 @@
           <input id="empleadoInput" inputmode="numeric" maxlength="5" autocomplete="off">
         </label>
         <button type="button" class="btn btn-config" id="empleadoConfirm">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="recoveryModal" hidden role="dialog" aria-modal="true" aria-labelledby="recoveryModalTitle">
+    <div class="modal modal--recovery">
+      <header class="modal__header">
+        <h2 id="recoveryModalTitle">Recuperación</h2>
+        <button type="button" class="modal__close" id="recoveryModalClose" aria-label="Salir">×</button>
+      </header>
+      <div class="modal__body recovery-body">
+        <p class="recovery-step" id="recoveryStepLabel">Paso 1 de 5</p>
+        <p class="recovery-lead" id="recoveryLead" hidden></p>
+        <div class="recovery-error-box" id="recoveryErrorBox" hidden>
+          <p class="recovery-error-box__code" id="recoveryCode"></p>
+          <p class="recovery-error-box__desc" id="recoveryErrorDesc"></p>
+        </div>
+        <p class="recovery-text" id="recoveryText"></p>
+        <div class="recovery-sensors" id="recoverySensors" hidden>
+          <div class="recovery-sensor" data-side="R">
+            <span class="recovery-sensor__name">Cortador derecho</span>
+            <span class="recovery-sensor__state" id="recoverySensorR">—</span>
+          </div>
+          <div class="recovery-sensor" data-side="L">
+            <span class="recovery-sensor__name">Cortador izquierdo</span>
+            <span class="recovery-sensor__state" id="recoverySensorL">—</span>
+          </div>
+        </div>
+        <div class="recovery-actions" id="recoveryActions"></div>
       </div>
     </div>
   </div>

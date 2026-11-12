@@ -12,24 +12,24 @@
 struct SensorSnapshot {
   bool holguraOn = false;
   bool cylinderOpen = false;
-  bool hoseAbsent = false;
+  bool limitActive = false;
 };
 
 struct FeedParams {
   float rpm = FEED_RPM;
+  float pullerRpm = PULLER_RPM;
   uint16_t settleMs = HOLGURA_SETTLE_MS;
   float onSec = HOLGURA_ON_FEED_SEC;
   float offFaultSec = HOLGURA_OFF_FAULT_SEC;
   float stallFaultSec = HOLGURA_STALL_FAULT_SEC;
-  uint16_t servoUs = PF_SERVO_ACTIVE_US;
 };
 
 struct StatusPod {
   uint8_t state = PF_RUN_IDLE;
   uint8_t fault = FAULT_NONE;
   uint8_t cylinder = 0;
-  uint8_t hose = 0;
   uint8_t holgura = 0;
+  uint8_t limit = 0;
 };
 
 static FeedParams gFeed;
@@ -52,6 +52,8 @@ static FeedParams paramsNow() {
 static void clampFeed(FeedParams& p) {
   if (p.rpm < RPM_MIN) p.rpm = RPM_MIN;
   if (p.rpm > RPM_MAX) p.rpm = RPM_MAX;
+  if (p.pullerRpm < RPM_MIN) p.pullerRpm = RPM_MIN;
+  if (p.pullerRpm > RPM_MAX) p.pullerRpm = RPM_MAX;
   if (p.settleMs < HOLGURA_SETTLE_MS_MIN) p.settleMs = HOLGURA_SETTLE_MS_MIN;
   if (p.settleMs > HOLGURA_SETTLE_MS_MAX) p.settleMs = HOLGURA_SETTLE_MS_MAX;
   if (p.onSec < 0.1f) p.onSec = 0.1f;
@@ -60,8 +62,6 @@ static void clampFeed(FeedParams& p) {
   if (p.offFaultSec > 300.0f) p.offFaultSec = 300.0f;
   if (p.stallFaultSec < 0.5f) p.stallFaultSec = 0.5f;
   if (p.stallFaultSec > 60.0f) p.stallFaultSec = 60.0f;
-  if (p.servoUs < SERVO_MIN_US) p.servoUs = SERVO_MIN_US;
-  if (p.servoUs > SERVO_MAX_US) p.servoUs = SERVO_MAX_US;
 }
 
 // --- FeedMotor: solo mueve el stepper. rpm <= 0 lo frena. ---
@@ -103,28 +103,43 @@ static void FeedMotor(float rpm) {
   if (feeder->setSpeed(rpm)) commandedFeederRpm = rpm;
 }
 
-// --- FeedServo: neutral, o el pulso recibido mientras debe correr. ---
+// --- MotorPuller: misma lógica que FeedMotor, otro GPIO STEP. ---
 
-static bool servoReady = false;
-static bool servoLedcOk = false;
-static uint16_t servoUs = 0;
+static StepperRMT* puller = nullptr;
+static float commandedPullerRpm = 0.0f;
 
-static uint32_t servoUsToDuty(uint16_t us) {
-  us = constrain(us, SERVO_MIN_US, SERVO_MAX_US);
-  return (uint32_t)us * ((1UL << SERVO_LEDC_BITS) - 1) / 20000UL;
+static bool MotorPullerMoving() {
+  if (commandedPullerRpm > 0.5f) return true;
+  return puller && fabsf(puller->currentRPM()) > 0.5f;
 }
 
-static void FeedServo(bool run, uint16_t activeUs) {
-  if (!servoReady) {
-    pinMode(PIN_SERVO, OUTPUT);
-    digitalWrite(PIN_SERVO, LOW);
-    servoLedcOk = ledcAttachChannel(PIN_SERVO, 50, SERVO_LEDC_BITS, SERVO_LEDC_CH);
-    servoReady = true;
+static void MotorPuller(float rpm) {
+  if (!puller) {
+    StepperRMT::Pins pins = { PIN_PULLER_STEP, -1, -1, -1, -1, -1, -1 };
+    puller = new StepperRMT(DRIVER_DM556T, pins);
+    puller->begin();
+    puller->setDefault(MOTOR_MICROSTEP, MOTOR_ACCEL, MOTOR_DECEL);
+    puller->Brake();
+    commandedPullerRpm = 0.0f;
   }
-  uint16_t us = run ? activeUs : SERVO_NEUTRAL_US;
-  us = constrain(us, SERVO_MIN_US, SERVO_MAX_US);
-  if (!servoLedcOk || us == servoUs) return;
-  if (ledcWrite(PIN_SERVO, servoUsToDuty(us))) servoUs = us;
+  // Parada suave: no usar Brake() en ciclo (resetea RMT y corta la rampa).
+  if (rpm <= 0.5f || rpm < RPM_MIN) {
+    if (commandedPullerRpm > 0.01f || puller->targetRPM() > 0.01f ||
+        fabsf(puller->currentRPM()) > 0.01f) {
+      puller->setSpeed(0.0f);
+      commandedPullerRpm = 0.0f;
+    }
+    return;
+  }
+  rpm = constrain(rpm, RPM_MIN, RPM_MAX);
+  const float tgt = puller->targetRPM();
+  const float cur = fabsf(puller->currentRPM());
+  // Reenviar si cambió el setpoint, se perdió el target, o quedó clavado en 0.
+  const bool needCmd = fabsf(commandedPullerRpm - rpm) > 0.5f ||
+                       fabsf(tgt - rpm) > 0.5f ||
+                       (cur < 0.5f && tgt < 0.5f);
+  if (!needCmd) return;
+  if (puller->setSpeed(rpm)) commandedPullerRpm = rpm;
 }
 
 // --- SensorMonitor: lectura y filtro. No mueve nada. ---
@@ -133,13 +148,16 @@ static SensorSnapshot gSnap;
 static uint32_t holgHighMs = 0;
 static uint32_t holgLowMs = 0;
 static bool holguraStableOn = false;
+static uint32_t limitHighMs = 0;
+static uint32_t limitLowMs = 0;
+static bool limitStableOn = false;
 static bool sensorsReady = false;
 
 static const SensorSnapshot& SensorMonitor(uint32_t nowMs) {
   if (!sensorsReady) {
     pinMode(PIN_CYLINDER, INPUT_PULLDOWN);
-    pinMode(PIN_HOSE, INPUT_PULLUP);
     pinMode(PIN_HOLGURA, INPUT_PULLUP);
+    pinMode(PIN_LIMIT, INPUT);  // GPIO34: solo entrada, sin pull interno
     sensorsReady = true;
   }
 
@@ -148,7 +166,6 @@ static const SensorSnapshot& SensorMonitor(uint32_t nowMs) {
   lastMs = nowMs;
 
   gSnap.cylinderOpen = digitalRead(PIN_CYLINDER) == HIGH;
-  gSnap.hoseAbsent = digitalRead(PIN_HOSE) == HIGH;
 
   if (digitalRead(PIN_HOLGURA) == HOLGURA_ON_LEVEL) {
     holgHighMs += dt;
@@ -160,10 +177,21 @@ static const SensorSnapshot& SensorMonitor(uint32_t nowMs) {
     if (holgLowMs >= HOLGURA_OFF_STABLE_MS) holguraStableOn = false;
   }
   gSnap.holguraOn = holguraStableOn;
+
+  if (digitalRead(PIN_LIMIT) == LIMIT_ACTIVE_LEVEL) {
+    limitHighMs += dt;
+    limitLowMs = 0;
+    if (limitHighMs >= LIMIT_ON_STABLE_MS) limitStableOn = true;
+  } else {
+    limitLowMs += dt;
+    limitHighMs = 0;
+    if (limitLowMs >= LIMIT_OFF_STABLE_MS) limitStableOn = false;
+  }
+  gSnap.limitActive = limitStableOn;
   return gSnap;
 }
 
-// --- FeedingMode: pide motor y servo según lo que vio SensorMonitor. ---
+// --- FeedingMode: pide FeedMotor y MotorPuller según lo que vio SensorMonitor. ---
 
 enum FeederMode : uint8_t { FEED_NONE = 0, FEED_HOLGURA };
 enum HolguraPhase : uint8_t { HOLG_IDLE = 0, HOLG_WAIT_ON, HOLG_SETTLE, HOLG_TIMED_FEED };
@@ -212,13 +240,14 @@ static bool forceFeedActive() {
 
 static bool feedMayRun() {
   if (fault == FAULT_NONE) return true;
-  return forceFeedActive() && fault == FAULT_HOLGURA;
+  // JOG (HMI / botón) permitido en holgura y límite para reposicionar.
+  return forceFeedActive() && (fault == FAULT_HOLGURA || fault == FAULT_LIMIT);
 }
 
 static void applyFeedOutputs(const FeedParams& p) {
   const bool run = feederDemand && feedMayRun();
   FeedMotor(run ? p.rpm : 0.0f);
-  FeedServo(run, p.servoUs);
+  MotorPuller(run ? p.pullerRpm : 0.0f);
 }
 
 static void enterFault(SystemFault f) {
@@ -275,7 +304,7 @@ static void serviceHolguraOffFault(uint32_t nowMs, const SensorSnapshot& s, cons
 }
 
 static void serviceHolguraStallFault(uint32_t nowMs, const SensorSnapshot& s, const FeedParams& p) {
-  if (fault != FAULT_NONE || s.holguraOn || FeedMotorMoving()) {
+  if (fault != FAULT_NONE || s.holguraOn || FeedMotorMoving() || MotorPullerMoving()) {
     holguraStallSinceMs = 0;
     return;
   }
@@ -343,13 +372,14 @@ static void FeedingMode(uint32_t nowMs) {
     }
   }
 
+  if (fault == FAULT_LIMIT && !s.limitActive) fault = FAULT_NONE;
   if (fault == FAULT_CYLINDER && !s.cylinderOpen) fault = FAULT_NONE;
-  if (fault == FAULT_HOSE && !s.hoseAbsent) fault = FAULT_NONE;
   // Holgura se limpia con sensor ON o si el operador omitió la vigilancia.
   if (fault == FAULT_HOLGURA && (s.holguraOn || gOmitHolgura)) fault = FAULT_NONE;
 
-  if (fault == FAULT_NONE) {
-    if (s.hoseAbsent) enterFault(FAULT_HOSE);
+  // Límite detiene el proceso (ciclo automático); JOG sigue permitido vía feedMayRun.
+  if (s.limitActive && fault != FAULT_LIMIT) enterFault(FAULT_LIMIT);
+  else if (fault == FAULT_NONE) {
     if (s.cylinderOpen) enterFault(FAULT_CYLINDER);
   }
 
@@ -400,12 +430,12 @@ static void publishStatus() {
   n.fault = (uint8_t)fault;
   n.state = (uint8_t)pfResolveState(fault, feederDemand);
   n.cylinder = gSnap.cylinderOpen;
-  n.hose = gSnap.hoseAbsent;
   n.holgura = gSnap.holguraOn;
+  n.limit = gSnap.limitActive;
   if (!statusMux) return;
   if (xSemaphoreTake(statusMux, portMAX_DELAY)) {
     if (n.state != gStatus.state || n.fault != gStatus.fault || n.cylinder != gStatus.cylinder
-        || n.hose != gStatus.hose || n.holgura != gStatus.holgura) {
+        || n.holgura != gStatus.holgura || n.limit != gStatus.limit) {
       gStatus = n;
       statusDirty = true;
     }
@@ -496,11 +526,11 @@ static void applyConfigJson(const String& body) {
   FeedParams next = paramsNow();
   float v = 0;
   if (jsonNum(cfg, "rpm", v)) next.rpm = v;
+  if (jsonNum(cfg, "puller_rpm", v)) next.pullerRpm = v;
   if (jsonNum(cfg, "settle_ms", v)) next.settleMs = (uint16_t)v;
   if (jsonNum(cfg, "on_s", v)) next.onSec = v;
   if (jsonNum(cfg, "off_fault_s", v)) next.offFaultSec = v;
   if (jsonNum(cfg, "stall_fault_s", v)) next.stallFaultSec = v;
-  if (jsonNum(cfg, "servo_us", v)) next.servoUs = (uint16_t)v;
   bool bit = false;
   if (jsonBoolCfg(body, "feed_lock", bit)) gFeedLock = bit;
   if (jsonBoolCfg(body, "omit_holgura", bit)) gOmitHolgura = bit;
@@ -511,13 +541,14 @@ static void applyConfigJson(const String& body) {
   clampFeed(next);
   if (!paramMux) return;
   if (xSemaphoreTake(paramMux, portMAX_DELAY)) {
-    const bool changed = next.rpm != gFeed.rpm || next.settleMs != gFeed.settleMs
-      || next.onSec != gFeed.onSec || next.offFaultSec != gFeed.offFaultSec
-      || next.stallFaultSec != gFeed.stallFaultSec || next.servoUs != gFeed.servoUs;
+    const bool changed = next.rpm != gFeed.rpm || next.pullerRpm != gFeed.pullerRpm
+      || next.settleMs != gFeed.settleMs || next.onSec != gFeed.onSec
+      || next.offFaultSec != gFeed.offFaultSec || next.stallFaultSec != gFeed.stallFaultSec;
     gFeed = next;
     xSemaphoreGive(paramMux);
     if (changed)
-      Serial.printf("[PF] config rpm %.1f settle %u on %.2f\n", next.rpm, next.settleMs, next.onSec);
+      Serial.printf("[PF] config rpm %.1f puller %.1f settle %u on %.2f\n",
+                    next.rpm, next.pullerRpm, next.settleMs, next.onSec);
   }
 }
 
@@ -533,10 +564,10 @@ static bool httpPostStatus(const StatusPod& pod) {
   body += String(pod.fault);
   body += ",\"sensors\":{\"cylinder\":";
   body += pod.cylinder ? "true" : "false";
-  body += ",\"hose\":";
-  body += pod.hose ? "true" : "false";
   body += ",\"holgura\":";
   body += pod.holgura ? "true" : "false";
+  body += ",\"limit\":";
+  body += pod.limit ? "true" : "false";
   body += "}}";
 
   HTTPClient http;
@@ -616,7 +647,7 @@ void setup() {
   paramMux = xSemaphoreCreateMutex();
   statusMux = xSemaphoreCreateMutex();
   FeedMotor(0);
-  FeedServo(false, gFeed.servoUs);
+  MotorPuller(0);
   wifiStart();
   xTaskCreatePinnedToCore(netTask, "pfnet", 8192, nullptr, 1, nullptr, 0);
 }
