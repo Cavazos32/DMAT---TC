@@ -33,7 +33,7 @@ static const uint32_t PARAM_MS_AT_HOME_END        = 50;
 
 static const float PARAM_DATA_TOLERANCE_MM_DEFAULT = 2.0f;
 
-// ── [A] Encoder OM + láser ──────────────────────────────────────────────────
+// ── [A] Encoder OM + láser + joint ──────────────────────────────────────────
 
 static const uint16_t PARAM_ENC_PPR               = 2000;
 static const uint8_t  PARAM_ENC_QUAD              = 1;
@@ -56,6 +56,9 @@ static const int  PARAM_PIN_ENC_Z_L = 25;
 static const int   PARAM_PIN_LASER_R        = 32;
 static const int   PARAM_PIN_LASER_L        = 34;
 static const bool  PARAM_LASER_ACTIVE_HIGH  = false;
+static const int   PARAM_PIN_JOINT_R        = 12;
+static const int   PARAM_PIN_JOINT_L        = 13;
+static const bool  PARAM_JOINT_ACTIVE_HIGH  = false;
 static const int   PARAM_PIN_SAFETY         = 26;
 static const float PARAM_ENC_OFFSET_MM        = 0.0f;
 
@@ -200,6 +203,9 @@ static inline void motionDataSetDefaults(MotionData* data) {
 #define LASER_PIN_R             PARAM_PIN_LASER_R
 #define LASER_PIN_L             PARAM_PIN_LASER_L
 #define LASER_ACTIVE_HIGH       PARAM_LASER_ACTIVE_HIGH
+#define JOINT_PIN_R             PARAM_PIN_JOINT_R
+#define JOINT_PIN_L             PARAM_PIN_JOINT_L
+#define JOINT_ACTIVE_HIGH       PARAM_JOINT_ACTIVE_HIGH
 #define SAFETY_PIN              PARAM_PIN_SAFETY
 #define ENC_OM_COUNTS_TO_MM     PARAM_ENC_COUNTS_TO_MM
 

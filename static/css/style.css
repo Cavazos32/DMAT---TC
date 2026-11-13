@@ -1164,7 +1164,7 @@ body {
 
 .motion-fieldset--validate .motion-validate__row {
   display: grid;
-  grid-template-columns: minmax(6.5rem, 8.75rem) minmax(0, 1fr) minmax(7.5rem, 11.5rem) minmax(8.5rem, max-content);
+  grid-template-columns: minmax(6.5rem, 8.75rem) minmax(0, 1fr) minmax(0, 1fr) minmax(7.5rem, 11.5rem) minmax(8.5rem, max-content);
   align-items: stretch;
   gap: 0.55rem;
   max-width: 100%;
@@ -1172,7 +1172,7 @@ body {
 
 .motion-validate__row {
   display: grid;
-  grid-template-columns: 8.75rem minmax(12rem, 1fr) 11.5rem max-content;
+  grid-template-columns: 8.75rem minmax(10rem, 1fr) minmax(10rem, 1fr) 11.5rem max-content;
   align-items: stretch;
   gap: 0.55rem;
 }

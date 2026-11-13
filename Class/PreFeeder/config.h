@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 // Lado: comentar la línea siguiente para L, descomentar para R (misma base de firmware).
-#define PF_SIDE_RIGHT
+//#define PF_SIDE_RIGHT
 
 #ifndef PF_CONFIG_SIDE
 #if defined(PF_SIDE_RIGHT)
@@ -46,23 +46,24 @@ static const char* const WIFI_PASS = "TCM2026!r&d";
 constexpr uint8_t PIN_CYLINDER = 25;
 constexpr int PIN_FEEDER_STEP = 18;
 constexpr int PIN_PULLER_STEP = 32;      // MotorPuller (distinto de FeedMotor)
+constexpr uint8_t PIN_PULLER_DIR = 33;   // MOSFET DIR puller: activo por defecto; 0=apagado
 constexpr uint8_t PIN_HOLGURA = 22;       // HIGH = holgura OK (ON)
 constexpr uint8_t HOLGURA_ON_LEVEL = HIGH;
 constexpr uint8_t PIN_LIMIT = 34;
-constexpr uint8_t LIMIT_ACTIVE_LEVEL = HIGH;  // activo = falla
+constexpr uint8_t LIMIT_ACTIVE_LEVEL = LOW;  // activo = falla (línea bajada; libre/HIGH = off)
 
-// Botón físico JOG - L / JOG - R (según PF_SIDE_TAG). Activo en LOW.
-// Solo cambia este número de GPIO para cablear otro pin.
-constexpr uint8_t PIN_JOG = 33;
-constexpr uint8_t JOG_ACTIVE_LEVEL = LOW;
+// Botón físico JOG - L / JOG - R (según PF_SIDE_TAG).
+// Opto: INPUT_PULLUP; al pulsar queda HIGH (activo).
+constexpr uint8_t PIN_JOG = 23;
+constexpr uint8_t JOG_ACTIVE_LEVEL = HIGH;
 constexpr uint32_t JOG_STABLE_MS = 20;
 
 // FeedMotor / MotorPuller. El maestro puede reemplazar FEED_RPM / PULLER_RPM en marcha.
-constexpr uint16_t MOTOR_MICROSTEP = 16;
+constexpr uint16_t MOTOR_MICROSTEP = 4;
 constexpr float MOTOR_ACCEL = 3000.0f;
 constexpr float MOTOR_DECEL = 3000.0f;
 constexpr float RPM_MIN = 1.0f;
-constexpr float RPM_MAX = 600.0f;
+constexpr float RPM_MAX = 3000.0f;
 constexpr float FEED_RPM = 60.0f;
 constexpr float PULLER_RPM = 60.0f;
 

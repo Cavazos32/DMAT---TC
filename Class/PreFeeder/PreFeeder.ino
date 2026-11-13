@@ -64,82 +64,100 @@ static void clampFeed(FeedParams& p) {
   if (p.stallFaultSec > 60.0f) p.stallFaultSec = 60.0f;
 }
 
-// --- FeedMotor: solo mueve el stepper. rpm <= 0 lo frena. ---
+// --- Steppers: mismo patrón que PreFeeder TCM (feeder + motor2), sin limitar RPM_MAX
+//     y con parada suave setSpeed(0) en ciclo (no Brake).
 
 static StepperRMT* feeder = nullptr;
+static StepperRMT* puller = nullptr;
 static float commandedFeederRpm = 0.0f;
+static float commandedPullerRpm = 0.0f;
+static uint8_t gPullerDir = 1;  // 1 = DIR MOSFET activo
+static bool motorsReady = false;
+
+static void PullerDir(uint8_t on) {
+  static bool ready = false;
+  if (!ready) {
+    pinMode(PIN_PULLER_DIR, OUTPUT);
+    ready = true;
+  }
+  gPullerDir = on ? 1 : 0;
+  digitalWrite(PIN_PULLER_DIR, gPullerDir ? HIGH : LOW);
+}
 
 static bool FeedMotorMoving() {
   if (commandedFeederRpm > 0.5f) return true;
   return feeder && fabsf(feeder->currentRPM()) > 0.5f;
 }
 
-static void FeedMotor(float rpm) {
-  if (!feeder) {
-    StepperRMT::Pins pins = { PIN_FEEDER_STEP, -1, -1, -1, -1, -1, -1 };
-    feeder = new StepperRMT(DRIVER_DM556T, pins);
-    feeder->begin();
-    feeder->setDefault(MOTOR_MICROSTEP, MOTOR_ACCEL, MOTOR_DECEL);
-    feeder->Brake();
-    commandedFeederRpm = 0.0f;
-  }
-  // Parada suave: no usar Brake() en ciclo (resetea RMT y corta la rampa).
-  if (rpm <= 0.5f || rpm < RPM_MIN) {
-    if (commandedFeederRpm > 0.01f || feeder->targetRPM() > 0.01f ||
-        fabsf(feeder->currentRPM()) > 0.01f) {
-      feeder->setSpeed(0.0f);
-      commandedFeederRpm = 0.0f;
-    }
-    return;
-  }
-  rpm = constrain(rpm, RPM_MIN, RPM_MAX);
-  const float tgt = feeder->targetRPM();
-  const float cur = fabsf(feeder->currentRPM());
-  // Reenviar si cambió el setpoint, se perdió el target, o quedó clavado en 0.
-  const bool needCmd = fabsf(commandedFeederRpm - rpm) > 0.5f ||
-                       fabsf(tgt - rpm) > 0.5f ||
-                       (cur < 0.5f && tgt < 0.5f);
-  if (!needCmd) return;
-  if (feeder->setSpeed(rpm)) commandedFeederRpm = rpm;
-}
-
-// --- MotorPuller: misma lógica que FeedMotor, otro GPIO STEP. ---
-
-static StepperRMT* puller = nullptr;
-static float commandedPullerRpm = 0.0f;
-
 static bool MotorPullerMoving() {
   if (commandedPullerRpm > 0.5f) return true;
   return puller && fabsf(puller->currentRPM()) > 0.5f;
 }
 
-static void MotorPuller(float rpm) {
-  if (!puller) {
-    StepperRMT::Pins pins = { PIN_PULLER_STEP, -1, -1, -1, -1, -1, -1 };
-    puller = new StepperRMT(DRIVER_DM556T, pins);
-    puller->begin();
-    puller->setDefault(MOTOR_MICROSTEP, MOTOR_ACCEL, MOTOR_DECEL);
-    puller->Brake();
-    commandedPullerRpm = 0.0f;
+// Parada suave en ciclo (requisito Class): no Brake — evita reset RMT.
+static void motorSoftStopIfRunning(StepperRMT* m, float& commanded) {
+  if (!m) return;
+  if (commanded > 0.01f || m->targetRPM() > 0.01f || fabsf(m->currentRPM()) > 0.01f) {
+    m->setSpeed(0.0f);
+    commanded = 0.0f;
   }
-  // Parada suave: no usar Brake() en ciclo (resetea RMT y corta la rampa).
-  if (rpm <= 0.5f || rpm < RPM_MIN) {
-    if (commandedPullerRpm > 0.01f || puller->targetRPM() > 0.01f ||
-        fabsf(puller->currentRPM()) > 0.01f) {
-      puller->setSpeed(0.0f);
-      commandedPullerRpm = 0.0f;
-    }
+}
+
+// Igual que TCM: solo cambia el target cuando la consigna realmente cambió.
+static void motorApplyRpm(StepperRMT* m, float& commanded, float targetRpm) {
+  if (!m) return;
+  if (targetRpm < RPM_MIN) {
+    motorSoftStopIfRunning(m, commanded);
     return;
   }
-  rpm = constrain(rpm, RPM_MIN, RPM_MAX);
-  const float tgt = puller->targetRPM();
-  const float cur = fabsf(puller->currentRPM());
-  // Reenviar si cambió el setpoint, se perdió el target, o quedó clavado en 0.
-  const bool needCmd = fabsf(commandedPullerRpm - rpm) > 0.5f ||
-                       fabsf(tgt - rpm) > 0.5f ||
-                       (cur < 0.5f && tgt < 0.5f);
-  if (!needCmd) return;
-  if (puller->setSpeed(rpm)) commandedPullerRpm = rpm;
+  targetRpm = constrain(targetRpm, RPM_MIN, RPM_MAX);
+  // La caché sola no basta: si la librería perdió/reseteó el target, reenviarlo.
+  if (fabsf(commanded - targetRpm) <= 0.5f
+      && fabsf(m->targetRPM() - targetRpm) <= 0.5f)
+    return;
+  if (m->setSpeed(targetRpm, MOTOR_ACCEL)) commanded = targetRpm;
+  // Si falla, motorsCommand se ejecuta otra vez y reintenta sin reiniciar perfil.
+}
+
+static void motorsCommand(float feedRpm, float pullRpm) {
+  // Nunca permitir JOG parcial: ambos canales deben estar inicializados.
+  if (!motorsReady || !feeder || !puller) return;
+  motorApplyRpm(feeder, commandedFeederRpm, feedRpm > 0.5f ? feedRpm : 0.0f);
+  motorApplyRpm(puller, commandedPullerRpm, pullRpm > 0.5f ? pullRpm : 0.0f);
+}
+
+static bool motorsInit() {
+  motorsReady = false;
+  PullerDir(1);
+
+  // Orden TCM: motor2 (GPIO 32) primero, luego feeder (GPIO 18).
+  StepperRMT::Pins pPull = { PIN_PULLER_STEP, -1, -1, -1, -1, -1, -1 };
+  puller = new StepperRMT(DRIVER_DM556T, pPull);
+  if (!puller->begin()) {
+    Serial.printf("[PF] puller begin FAIL GPIO %d\n", PIN_PULLER_STEP);
+    delete puller;
+    puller = nullptr;
+    return false;
+  }
+  puller->setDefault(MOTOR_MICROSTEP, MOTOR_ACCEL, MOTOR_DECEL);
+  puller->Brake();
+  commandedPullerRpm = 0.0f;
+
+  StepperRMT::Pins pFeed = { PIN_FEEDER_STEP, -1, -1, -1, -1, -1, -1 };
+  feeder = new StepperRMT(DRIVER_DM556T, pFeed);
+  if (!feeder->begin()) {
+    Serial.printf("[PF] feeder begin FAIL GPIO %d\n", PIN_FEEDER_STEP);
+    delete feeder;
+    feeder = nullptr;
+    return false;
+  }
+  feeder->setDefault(MOTOR_MICROSTEP, MOTOR_ACCEL, MOTOR_DECEL);
+  feeder->Brake();
+  commandedFeederRpm = 0.0f;
+
+  motorsReady = true;
+  Serial.printf("[PF] motors OK step F=%d P=%d\n", PIN_FEEDER_STEP, PIN_PULLER_STEP);
+  return true;
 }
 
 // --- SensorMonitor: lectura y filtro. No mueve nada. ---
@@ -157,7 +175,7 @@ static const SensorSnapshot& SensorMonitor(uint32_t nowMs) {
   if (!sensorsReady) {
     pinMode(PIN_CYLINDER, INPUT_PULLDOWN);
     pinMode(PIN_HOLGURA, INPUT_PULLUP);
-    pinMode(PIN_LIMIT, INPUT);  // GPIO34: solo entrada, sin pull interno
+    pinMode(PIN_LIMIT, INPUT_PULLUP);
     sensorsReady = true;
   }
 
@@ -239,15 +257,12 @@ static bool forceFeedActive() {
 }
 
 static bool feedMayRun() {
-  if (fault == FAULT_NONE) return true;
-  // JOG (HMI / botón) permitido en holgura y límite para reposicionar.
-  return forceFeedActive() && (fault == FAULT_HOLGURA || fault == FAULT_LIMIT);
+  return fault == FAULT_NONE;
 }
 
 static void applyFeedOutputs(const FeedParams& p) {
   const bool run = feederDemand && feedMayRun();
-  FeedMotor(run ? p.rpm : 0.0f);
-  MotorPuller(run ? p.pullerRpm : 0.0f);
+  motorsCommand(run ? p.rpm : 0.0f, run ? p.pullerRpm : 0.0f);
 }
 
 static void enterFault(SystemFault f) {
@@ -372,23 +387,24 @@ static void FeedingMode(uint32_t nowMs) {
     }
   }
 
-  if (fault == FAULT_LIMIT && !s.limitActive) fault = FAULT_NONE;
-  if (fault == FAULT_CYLINDER && !s.cylinderOpen) fault = FAULT_NONE;
-  // Holgura se limpia con sensor ON o si el operador omitió la vigilancia.
-  if (fault == FAULT_HOLGURA && (s.holguraOn || gOmitHolgura)) fault = FAULT_NONE;
-
-  // Límite detiene el proceso (ciclo automático); JOG sigue permitido vía feedMayRun.
-  if (s.limitActive && fault != FAULT_LIMIT) enterFault(FAULT_LIMIT);
-  else if (fault == FAULT_NONE) {
-    if (s.cylinderOpen) enterFault(FAULT_CYLINDER);
-  }
-
-  if (forceFeedActive() && feedMayRun()) {
+  // JOG (HMI o boton): fuerza giro ya; sin fallas ni feed_lock.
+  if (forceFeedActive()) {
     holguraOffSinceMs = 0;
     holguraStallSinceMs = 0;
     feederDemand = true;
-    applyFeedOutputs(p);
+    motorsCommand(p.rpm, p.pullerRpm);
     return;
+  }
+
+  if (fault == FAULT_LIMIT && !s.limitActive) fault = FAULT_NONE;
+  if (fault == FAULT_CYLINDER && !s.cylinderOpen) fault = FAULT_NONE;
+  // Holgura se limpia con sensor ON o si el operador omitio la vigilancia.
+  if (fault == FAULT_HOLGURA && (s.holguraOn || gOmitHolgura)) fault = FAULT_NONE;
+
+  // Limite / cilindro solo afectan el ciclo automatico.
+  if (s.limitActive && fault != FAULT_LIMIT) enterFault(FAULT_LIMIT);
+  else if (fault == FAULT_NONE) {
+    if (s.cylinderOpen) enterFault(FAULT_CYLINDER);
   }
 
   if (gFeedLock) {
@@ -646,8 +662,7 @@ void setup() {
   clampFeed(gFeed);
   paramMux = xSemaphoreCreateMutex();
   statusMux = xSemaphoreCreateMutex();
-  FeedMotor(0);
-  MotorPuller(0);
+  if (!motorsInit()) Serial.println("[PF] motorsInit incomplete");
   wifiStart();
   xTaskCreatePinnedToCore(netTask, "pfnet", 8192, nullptr, 1, nullptr, 0);
 }

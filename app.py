@@ -2000,22 +2000,20 @@ def _recovery_cutters_clear_now() -> bool:
 
 
 def _enter_machine_error(primary: str, msg: str, *, en_curso: bool | None = None) -> None:
-    """Un solo evento al entrar en error; luego solo actualiza el banner."""
+    """Un solo evento al entrar en error; el primer código queda congelado hasta Reset."""
     with _STATE_LOCK:
         in_error = _MACHINE_STATE.get("estado") == "error"
+        had_code = bool(str(_MACHINE_STATE.get("ciclo_error") or "").strip())
+        existing_code = str(_MACHINE_STATE.get("ciclo_error") or "").strip()
+        existing_msg = str(_MACHINE_STATE.get("mensaje") or "")
         if en_curso is None:
             en_curso = bool(_MACHINE_STATE.get("ciclo_en_curso"))
-    if in_error:
-        with _STATE_LOCK:
-            stale = _MACHINE_STATE.get("mensaje") != msg or _MACHINE_STATE.get("ciclo_error") != primary
-            if stale:
-                rec = dict(_MACHINE_STATE.get("recovery") or _recovery_blank())
-                if rec.get("active") and rec.get("step") == "error":
-                    rec["code"] = str(primary or "").strip()
-                    rec["mensaje"] = str(msg or "").strip()
-                    _MACHINE_STATE["recovery"] = rec
-        if stale:
-            _set_machine_ui(mensaje=msg, ciclo_error=primary)
+    if in_error or had_code:
+        # Mismo stop: no pisar código/mensaje del popup con fallos posteriores.
+        if not _recovery_get().get("active"):
+            _recovery_begin(existing_code or primary, existing_msg or msg)
+        if not in_error:
+            _set_machine_ui(estado="error", estado_label="Error")
         return
     _push_event(msg, "error")
     with _STATE_LOCK:
@@ -6622,6 +6620,8 @@ def _encoder_from_status(replies):
                 item["mm"] = live
             if "laser" in block:
                 item["laser"] = bool(block.get("laser"))
+            if "joint" in block:
+                item["joint"] = bool(block.get("joint"))
             if item:
                 reading[side] = item
     return reading

@@ -1470,23 +1470,27 @@
     await sendMotionOp(op, extra);
   }
 
+  function motionShowSensorLed(led, side, name, on) {
+    if (!led) return;
+    const state = led.querySelector(".motion-laser__state");
+    const label = on ? "Detectado" : "Sin detección";
+    led.classList.toggle("is-on", on);
+    if (state && state.textContent !== label) state.textContent = label;
+    led.setAttribute("aria-label", name + " lado " + side + (on ? " detectado" : " sin detección"));
+  }
+
   function motionShowEncoder(encoder) {
     ["R", "L"].forEach(function (side) {
       const el = document.getElementById(side === "R" ? "encReadR" : "encReadL");
-      const led = document.getElementById(side === "R" ? "laserLedR" : "laserLedL");
+      const laserLed = document.getElementById(side === "R" ? "laserLedR" : "laserLedL");
+      const jointLed = document.getElementById(side === "R" ? "jointLedR" : "jointLedL");
       const sideData = encoder && encoder[side];
       if (el) {
         const mm = sideData && sideData.mm;
         el.textContent = mm == null || !Number.isFinite(Number(mm)) ? "—" : Number(mm).toFixed(2) + " mm";
       }
-      if (led) {
-        const on = !!(sideData && sideData.laser === true);
-        const state = led.querySelector(".motion-laser__state");
-        const label = on ? "Detectado" : "Sin detección";
-        led.classList.toggle("is-on", on);
-        if (state && state.textContent !== label) state.textContent = label;
-        led.setAttribute("aria-label", "Láser lado " + side + (on ? " detectado" : " sin detección"));
-      }
+      motionShowSensorLed(laserLed, side, "Láser", !!(sideData && sideData.laser === true));
+      motionShowSensorLed(jointLed, side, "Joint", !!(sideData && sideData.joint === true));
     });
   }
 

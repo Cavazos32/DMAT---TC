@@ -68,9 +68,9 @@ static void wifiPoll() {
 
 static void clampSide(PfSideParams& p) {
   if (p.rpm < 1.0f) p.rpm = 1.0f;
-  if (p.rpm > 600.0f) p.rpm = 600.0f;
+  if (p.rpm > 3000.0f) p.rpm = 3000.0f;
   if (p.pullerRpm < 1.0f) p.pullerRpm = 1.0f;
-  if (p.pullerRpm > 600.0f) p.pullerRpm = 600.0f;
+  if (p.pullerRpm > 3000.0f) p.pullerRpm = 3000.0f;
   if (p.settleMs < 10) p.settleMs = 10;
   if (p.settleMs > 500) p.settleMs = 500;
   if (p.onSec < 0.1f) p.onSec = 0.1f;

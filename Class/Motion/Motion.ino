@@ -789,6 +789,8 @@ static int32_t feederFeedVelocity(MotionSide side) {
 static void initLasersHw() {
   pinMode(LASER_PIN_R, INPUT_PULLUP);
   pinMode(LASER_PIN_L, INPUT);
+  pinMode(JOINT_PIN_R, INPUT_PULLUP);
+  pinMode(JOINT_PIN_L, INPUT_PULLUP);
   pinMode(SAFETY_PIN, INPUT_PULLUP);
 }
 
@@ -800,6 +802,13 @@ static bool laserIsOn(MotionSide side) {
   int pin = (side == MOTION_SIDE_R) ? LASER_PIN_R : LASER_PIN_L;
   int level = digitalRead(pin);
   if (LASER_ACTIVE_HIGH) return level == HIGH;
+  return level == LOW;
+}
+
+static bool jointIsOn(MotionSide side) {
+  int pin = (side == MOTION_SIDE_R) ? JOINT_PIN_R : JOINT_PIN_L;
+  int level = digitalRead(pin);
+  if (JOINT_ACTIVE_HIGH) return level == HIGH;
   return level == LOW;
 }
 
@@ -1417,6 +1426,8 @@ static void printStatusJson() {
     Serial.print(encoderWithinTolerance((MotionSide)i) ? "true" : "false");
     Serial.print(F(",\"laser\":"));
     Serial.print(laserIsOn((MotionSide)i) ? "true" : "false");
+    Serial.print(F(",\"joint\":"));
+    Serial.print(jointIsOn((MotionSide)i) ? "true" : "false");
     Serial.print(F("}"));
   }
 
